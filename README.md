@@ -50,7 +50,7 @@ Están agrupados en un Blueprint con el prefijo `/db` y leen `chinook.db` en mod
 
 | Endpoint | Descripción |
 |---|---|
-| `/db/artists/<artist_id>/albums` | Devuelve los álbumes del artista ordenados por título. Responde 404 si el artista no existe. |
+| `/db/artists/<artist_id>/albums` | Devuelve los álbumes del artista ordenados por título (`album_id`, `title`, `artist_id`). Responde 404 si el artista no existe y `[]` si existe pero no tiene álbumes. |
 
 ### Ejemplos
 
@@ -74,7 +74,7 @@ curl localhost:5000/db/artists/999999/albums
 | `config.py` | Configuración de Flask-Session (sesiones guardadas en `flask_session/`). |
 | `models.py` | Clases `Artist` y `Album` y el almacén en memoria con los datos de ejemplo. |
 | `routes.py` | Endpoints que usan los datos en memoria. |
-| `db_routes.py` | Blueprint `/db` con los endpoints que consultan `chinook.db`. |
+| `db_routes.py` | Blueprint `/db` con los endpoints que consultan `chinook.db` y el modelo Pydantic `AlbumOut` que valida sus respuestas. |
 | `analytics.py` | Funciones puras de estadísticas usadas por `/stats/*`. |
 | `chinook.db` | Base de datos de ejemplo Chinook (SQLite). |
 | `test_routes.py`, `test_db_routes.py` | Pruebas con pytest. |

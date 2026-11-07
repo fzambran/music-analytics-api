@@ -5,10 +5,19 @@ from contextlib import closing
 from pathlib import Path
 
 from flask import Blueprint, jsonify
+from pydantic import BaseModel, Field
 
 CHINOOK_DB_PATH = Path(__file__).resolve().parent / "chinook.db"
 
 db_bp = Blueprint("db", __name__, url_prefix="/db")
+
+
+class AlbumOut(BaseModel):
+    """Album as returned by the API, validated from a Chinook `Album` row."""
+
+    album_id: int = Field(validation_alias="AlbumId")
+    title: str = Field(validation_alias="Title")
+    artist_id: int = Field(validation_alias="ArtistId")
 
 
 def get_db_connection() -> sqlite3.Connection:
@@ -20,7 +29,10 @@ def get_db_connection() -> sqlite3.Connection:
 
 @db_bp.route("/artists/<int:artist_id>/albums", methods=["GET"])
 def get_artist_albums(artist_id: int):
-    """Return the albums of an artist from chinook.db, ordered by title (404 if missing)."""
+    """Return the albums of an artist from chinook.db, ordered by title.
+
+    Responds 404 if the artist does not exist and 200 with `[]` if it has no albums.
+    """
     with closing(get_db_connection()) as connection:
         artist = connection.execute(
             "SELECT ArtistId FROM Artist WHERE ArtistId = ?", (artist_id,)
@@ -34,13 +46,5 @@ def get_artist_albums(artist_id: int):
             (artist_id,),
         ).fetchall()
 
-    return jsonify(
-        [
-            {
-                "album_id": row["AlbumId"],
-                "title": row["Title"],
-                "artist_id": row["ArtistId"],
-            }
-            for row in rows
-        ]
-    )
+    albums = [AlbumOut.model_validate(dict(row)) for row in rows]
+    return jsonify([album.model_dump() for album in albums])
