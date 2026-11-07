@@ -1,8 +1,12 @@
 """Tests for the chinook.db-backed Blueprint routes."""
 
+import sqlite3
+from contextlib import closing
+
 import pytest
 
 from app import app
+from db_routes import CHINOOK_DB_PATH
 
 
 @pytest.fixture
@@ -92,3 +96,29 @@ def test_db_artist_albums_invalid_artist_id_not_routed(client, artist_id):
 def test_db_artist_albums_rejects_post(client):
     response = client.post("/db/artists/1/albums")
     assert response.status_code == 405
+
+
+def test_db_artist_albums_match_database_for_every_artist(client):
+    """Every artist in chinook.db gets exactly its albums, sorted by title."""
+    uri = f"{CHINOOK_DB_PATH.as_uri()}?mode=ro"
+    with closing(sqlite3.connect(uri, uri=True)) as connection:
+        artist_ids = [
+            row[0] for row in connection.execute("SELECT ArtistId FROM Artist")
+        ]
+        expected_by_artist = {
+            artist_id: [
+                {"album_id": album_id, "title": title, "artist_id": artist_id}
+                for album_id, title in connection.execute(
+                    "SELECT AlbumId, Title FROM Album "
+                    "WHERE ArtistId = ? ORDER BY Title",
+                    (artist_id,),
+                )
+            ]
+            for artist_id in artist_ids
+        }
+
+    assert len(expected_by_artist) == 275
+    for artist_id, expected in expected_by_artist.items():
+        response = client.get(f"/db/artists/{artist_id}/albums")
+        assert response.status_code == 200, artist_id
+        assert response.get_json() == expected, artist_id
