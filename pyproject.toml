@@ -1,7 +1,7 @@
 [project]
 name = "music-analytics-api"
 version = "0.1.0"
-description = "Add your description here"
+description = "API REST en Flask para analítica musical sobre la base de datos Chinook."
 readme = "README.md"
 authors = [
     { name = "Felipe Zambrano", email = "felipe.zambrano@gmail.com" }
