@@ -11,7 +11,7 @@ CHINOOK_DB_PATH = Path(__file__).resolve().parent / "chinook.db"
 db_bp = Blueprint("db", __name__, url_prefix="/db")
 
 
-def _connect() -> sqlite3.Connection:
+def get_db_connection() -> sqlite3.Connection:
     """Open a read-only connection to chinook.db with rows accessible by column name."""
     connection = sqlite3.connect(f"{CHINOOK_DB_PATH.as_uri()}?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
@@ -21,7 +21,7 @@ def _connect() -> sqlite3.Connection:
 @db_bp.route("/artists/<int:artist_id>/albums", methods=["GET"])
 def get_artist_albums(artist_id: int):
     """Return the albums of an artist from chinook.db, ordered by title (404 if missing)."""
-    with closing(_connect()) as connection:
+    with closing(get_db_connection()) as connection:
         artist = connection.execute(
             "SELECT ArtistId FROM Artist WHERE ArtistId = ?", (artist_id,)
         ).fetchone()
