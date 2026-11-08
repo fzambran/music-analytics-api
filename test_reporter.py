@@ -407,9 +407,44 @@ def test_find_artist_ids_containing_returns_every_match_in_id_order(connection):
     assert ids == expected
 
 
-@pytest.mark.parametrize("text", ["", "   ", "zzz-no-artist"])
+@pytest.mark.parametrize("text", ["", "   ", "zzz-no-artist", "/-/", "' & '"])
 def test_find_artist_ids_containing_no_match(connection, text):
     assert find_artist_ids_containing(connection, text) == []
+
+
+@pytest.mark.parametrize(
+    ("text", "expected_names"),
+    [
+        ("acdc", ["AC/DC"]),  # punctuation ignored
+        ("AC-DC", ["AC/DC"]),
+        ("guns n roses", ["Guns N' Roses"]),  # spaces and apostrophe ignored
+        ("gunsnroses", ["Guns N' Roses"]),
+        ("antonio carlos", ["Antônio Carlos Jobim"]),  # accents ignored
+        ("nacao", ["Chico Science & Nação Zumbi", "Nação Zumbi"]),
+    ],
+)
+def test_artist_contains_ignores_accents_spaces_and_punctuation(
+    connection, text, expected_names
+):
+    names = dict(connection.execute("SELECT ArtistId, Name FROM Artist"))
+    ids = find_artist_ids_containing(connection, text)
+    assert [names[artist_id] for artist_id in ids] == expected_names
+
+
+@pytest.mark.parametrize("name", ["acdc", "AC-DC", "antonio carlos jobim"])
+def test_exact_search_is_not_normalized(connection, name):
+    """--artist keeps requiring the name as written, apart from case."""
+    assert find_artist_id(connection, name) is None
+
+
+def test_cli_artist_contains_normalized(capsys):
+    assert reporter.main(["--format", "json", "--artist-contains", "acdc"]) == 0
+    assert [row["name"] for row in json.loads(capsys.readouterr().out)] == ["AC/DC"]
+
+
+def test_cli_artist_exact_is_not_normalized(capsys):
+    assert reporter.main(["--format", "json", "--artist", "acdc"]) == 1
+    assert capsys.readouterr().err == "error: no se encontró el artista 'acdc'\n"
 
 
 def test_get_artist_stats_filters_by_several_ids(connection):
@@ -475,6 +510,13 @@ def test_cli_artist_contains_without_matches_exits_1(capsys):
         (
             ["--format", "json", "--artist-contains", " "],
             "error: argumento --artist-contains: el texto de búsqueda no puede estar vacío",
+        ),
+        (
+            ["--format", "json", "--artist-contains", "/-/"],
+            (
+                "error: argumento --artist-contains: '/-/' debe contener al menos"
+                " una letra o un número"
+            ),
         ),
         (
             ["--format", "json", "--artist-id", "1", "--artist", "AC/DC"],
