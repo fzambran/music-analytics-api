@@ -4,9 +4,10 @@ import sqlite3
 from contextlib import closing
 
 import pytest
+from pydantic import ValidationError
 
 from app import app
-from db_routes import CHINOOK_DB_PATH
+from db_routes import CHINOOK_DB_PATH, AlbumOut
 
 
 @pytest.fixture
@@ -122,3 +123,21 @@ def test_db_artist_albums_match_database_for_every_artist(client):
         response = client.get(f"/db/artists/{artist_id}/albums")
         assert response.status_code == 200, artist_id
         assert response.get_json() == expected, artist_id
+
+
+def test_album_out_maps_chinook_columns_to_api_keys():
+    album = AlbumOut.model_validate({"AlbumId": 5, "Title": "Big Ones", "ArtistId": 3})
+    assert album.model_dump() == {"album_id": 5, "title": "Big Ones", "artist_id": 3}
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        {"AlbumId": 5, "Title": None, "ArtistId": 3},
+        {"AlbumId": "not-a-number", "Title": "Big Ones", "ArtistId": 3},
+        {"AlbumId": 5, "ArtistId": 3},
+    ],
+)
+def test_album_out_rejects_invalid_rows(row):
+    with pytest.raises(ValidationError):
+        AlbumOut.model_validate(row)
