@@ -7,7 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from app import app
-from db_routes import CHINOOK_DB_PATH, AlbumOut
+from db_routes import CHINOOK_DB_PATH, AlbumOut, get_db_connection
 
 
 @pytest.fixture
@@ -141,3 +141,22 @@ def test_album_out_maps_chinook_columns_to_api_keys():
 def test_album_out_rejects_invalid_rows(row):
     with pytest.raises(ValidationError):
         AlbumOut.model_validate(row)
+
+
+def test_get_db_connection_is_read_only():
+    """Writes through get_db_connection must fail; the no-op UPDATE is rolled back."""
+    with closing(get_db_connection()) as connection:
+        try:
+            with pytest.raises(sqlite3.OperationalError, match="readonly"):
+                connection.execute("UPDATE Artist SET Name = Name WHERE ArtistId = 1")
+        finally:
+            connection.rollback()
+
+
+def test_get_db_connection_rows_accessible_by_column_name():
+    with closing(get_db_connection()) as connection:
+        row = connection.execute(
+            "SELECT ArtistId, Name FROM Artist WHERE ArtistId = 1"
+        ).fetchone()
+    assert row["ArtistId"] == 1
+    assert row["Name"] == "AC/DC"
