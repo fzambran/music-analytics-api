@@ -79,7 +79,8 @@ Según las opciones se ejecutan entre 1 y 4 consultas (la 2 se omite si no hay r
 |---|---|
 | `validate_schema(connection)` | Comprueba `REQUIRED_SCHEMA` con `pragma_table_info(?)`, sin distinguir mayúsculas. Lanza `SchemaError` con **todas** las tablas y columnas que faltan. |
 | `find_artist_id(connection, name) -> int \| None` | Nombre exacto con `casefold()` en Python (también pliega letras con acento, a diferencia de `LOWER`/`NOCASE` de SQLite). Ignora espacios externos. |
-| `find_artist_ids_containing(connection, text) -> list[int]` | Todos los artistas cuyo nombre contiene el texto, con el mismo plegado, en orden de ID. Texto vacío → `[]`. |
+| `normalize_for_search(text) -> str` | Deja solo letras y números en minúsculas y sin acentos (NFKD + `casefold()`): `"AC/DC"` → `"acdc"`, `"Antônio"` → `"antonio"`. Conserva letras de otros alfabetos. |
+| `find_artist_ids_containing(connection, text) -> list[int]` | Todos los artistas cuyo nombre contiene el texto, comparando ambos lados con `normalize_for_search` (ignora mayúsculas, acentos, espacios y puntuación), en orden de ID. Un texto sin letras ni números → `[]`. |
 | `get_artist_stats(connection, *, artist_id=None, artist_ids=None, top=None, sort_by="revenue", include_albums=False)` | Ejecuta las consultas 1 a 3. No abre ni cierra la conexión. `top` se aplica después del filtro. `ValueError` si `sort_by` no está en la lista blanca, si `top < 1` o si se pasan `artist_id` y `artist_ids` a la vez. |
 | `to_json(stats, file)` | Lista de objetos, `ensure_ascii=False`, `indent=2`, salto de línea final. `albums` solo aparece si se pidió el detalle. |
 | `to_csv(stats, file, *, detail=False)` | `csv.DictWriter`. Sin detalle: una fila por artista, `revenue` con 2 decimales y géneros unidos con `; `. Con detalle: una fila por álbum (los artistas sin álbumes no generan filas). |
@@ -104,8 +105,8 @@ uv run python reporter.py --format {json,csv} [--output RUTA] [--db RUTA]
 | `--output RUTA` | Archivo en UTF-8; crea los directorios que falten. Sin esta opción escribe a stdout. |
 | `--db RUTA` | Base SQLite a leer, en solo lectura. Por defecto, `chinook.db` del repositorio. |
 | `--artist-id N` | Un artista por ID (entero entre 1 y 2^63−1, el máximo que acepta SQLite). |
-| `--artist NOMBRE` | Un artista por nombre exacto, sin distinguir mayúsculas. |
-| `--artist-contains TEXTO` | Todos los artistas cuyo nombre contiene el texto (no vacío), sin distinguir mayúsculas. |
+| `--artist NOMBRE` | Un artista por nombre exacto, sin distinguir mayúsculas; los espacios y la puntuación deben coincidir (`acdc` no encuentra a AC/DC). |
+| `--artist-contains TEXTO` | Todos los artistas cuyo nombre contiene el texto, sin distinguir mayúsculas, acentos, espacios ni puntuación (`acdc` → AC/DC). El texto debe tener al menos una letra o un número. |
 | `--top N` | Los primeros N según el orden (entero entre 1 y 2^63−1), después del filtro de artista. |
 | `--sort-by CAMPO` | Un campo de `SORT_COLUMNS`; por defecto `revenue`. |
 | `--detail` | Detalle por álbum: anidado en JSON, una fila por álbum en CSV. |
@@ -140,20 +141,20 @@ No se traducen, a propósito: el texto de `--help`, los `ValueError` de las func
 
 ## Pruebas
 
-132 pruebas del reporte, dentro de las 209 del repositorio.
+159 pruebas del reporte, dentro de las 236 del repositorio.
 
-**`test_reporter.py`** (78, integración contra el `chinook.db` real):
+**`test_reporter.py`** (92, integración contra el `chinook.db` real):
 
 - Una fila por artista (275); ninguna métrica `None`; valores exactos de AC/DC, Iron Maiden y del artista 25.
 - Totales iguales a los de las tablas originales (álbumes, pistas, duración, unidades, ingresos 2328.60): detectan conteos inflados.
 - Géneros ordenados, distintos y existentes en `Genre`; solo los artistas sin pistas no tienen géneros.
 - Detalle por álbum: para los 275 artistas, sus álbumes suman exactamente los totales del artista; orden por título.
 - Órdenes (ingresos por defecto, nombre sin distinguir mayúsculas, métricas descendentes), `top`, filtros por ID y por lista de IDs, y errores de `ValueError`.
-- Búsqueda exacta y parcial: mayúsculas, acentos (`"ANTÔNIO CARLOS JOBIM"`, `"NAÇÃO"`), espacios, sin coincidencias.
+- Búsqueda exacta y parcial: mayúsculas, acentos (`"ANTÔNIO CARLOS JOBIM"`, `"NAÇÃO"`), espacios, sin coincidencias; la parcial normalizada (`acdc`, `guns n roses`, `antonio carlos`, `nacao`) y la exacta sin normalizar.
 - `validate_schema` acepta el `chinook.db` real.
 - CLI: JSON a stdout, CSV a archivo, `--artist`, `--artist-contains`, `--detail` en JSON y CSV, `--db` con base inexistente (sin crear el archivo), dañada o vacía, creación de directorios, salida no escribible, y los 8 errores de uso comparados con el texto exacto en español.
 
-**`test_reporter_unit.py`** (54, sin `chinook.db`):
+**`test_reporter_unit.py`** (67, sin `chinook.db`):
 
 - Exportadores con datos armados a mano e `io.StringIO`: orden de claves, acentos sin escapar, nombres con comas y comillas, listas vacías, detalle anidado y una fila por álbum.
 - Agregación sobre una base SQLite en memoria con datos conocidos: ventas repetidas que no inflan conteos, 0.99 × 3 = 2.97 exacto, géneros, detalle por álbum.
@@ -186,6 +187,7 @@ No se traducen, a propósito: el texto de `--help`, los `ValueError` de las func
 | Revisión | `BrokenPipeError` manejado al escribir a stdout | `\| head` mostraba dos tracebacks. |
 | Revisión | IDs como un parámetro JSON con `json_each(?)` | Más de 32 766 artistas superaban el límite de variables de SQLite. |
 | Revisión | `NULL` en nombres, títulos, duraciones y géneros | Un `Artist.Name` en `NULL` rompía la búsqueda con `AttributeError`. |
+| Normalización | `--artist-contains` ignora acentos, espacios y puntuación (`normalize_for_search`); `--artist` no cambia | "acdc" no encontraba a "AC/DC". Solo en la búsqueda parcial, para que la exacta no genere empates entre nombres que difieren en puntuación. |
 | Revisión | Errores de consulta separados de los de apertura | Un `database is locked` se mostraba como "no se pudo abrir la base de datos". |
 
 Partes del plan original que quedaron obsoletas: la sección "Rama" (`feat/artist-reporter` ya se fusionó y se borró), el riesgo "si el PR #3 se fusiona no cambia `get_db_connection`" y la prueba de base inexistente con `monkeypatch`.
@@ -195,6 +197,7 @@ Partes del plan original que quedaron obsoletas: la sección "Rama" (`feat/artis
 - **Ingresos en JSON como número** (`138.6`, no `"138.60"`). Si algún consumidor necesita siempre 2 decimales, habría que emitir texto o centavos enteros.
 - **Traducción de argparse atada a Python 3.12.** Si una versión futura cambia sus plantillas, esos mensajes aparecerán sin traducir (no se ocultan). Las pruebas de texto exacto lo detectarían.
 - **Acoplamiento a `db_routes`.** `reporter.py` importa `db_routes`, que trae Flask y Pydantic. Si se quisiera usar el reporte sin esas dependencias, habría que mover `get_db_connection` a un módulo propio.
+- **Más coincidencias con textos cortos en `--artist-contains`:** al ignorar la puntuación y los espacios, "ac" pasa de 22 a 26 artistas en Chinook. Es el precio de que "acdc" encuentre a "AC/DC".
 - **`--sort-by name`** usa `NOCASE`, que solo ignora mayúsculas en letras sin acento; la búsqueda por nombre sí pliega acentos. La diferencia solo afecta el orden de nombres que empiezan con una mayúscula acentuada.
 - **Pistas sin álbum:** hoy no existen en Chinook (`Track.AlbumId` nunca es `NULL`); si aparecieran, no se atribuirían a ningún artista.
 - **stdout en Windows:** `sys.stdout` no usa `newline=""`, así que el CSV por stdout podría tener líneas en blanco extra, y una consola que no use UTF-8 podría fallar con los acentos. No se pudo probar; con `--output` no ocurre.
@@ -204,10 +207,11 @@ Partes del plan original que quedaron obsoletas: la sección "Rama" (`feat/artis
 
 ```sh
 uv sync
-uv run pytest                                   # 209 pruebas
+uv run pytest                                   # 236 pruebas
 uv run ruff check . && uv run ruff format --check .
 uv run python reporter.py --format json --top 3              # Iron Maiden, U2, Metallica
 uv run python reporter.py --format csv --artist-contains jobim --detail
+uv run python reporter.py --format csv --artist-contains acdc               # AC/DC
 uv run python reporter.py --format json --artist-id 999999; echo "exit=$?"   # 1, mensaje en español
 uv run python reporter.py --format xml; echo "exit=$?"                       # 2, mensaje en español
 uv run python reporter.py --format json | head -c 20                         # sin traceback

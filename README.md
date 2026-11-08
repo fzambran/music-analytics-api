@@ -85,8 +85,8 @@ uv run python reporter.py --format csv --detail --output reportes/albumes.csv   
 | `--output RUTA` | Archivo de salida en UTF-8. Crea los directorios que falten. Si se omite, escribe a stdout. |
 | `--db RUTA` | Base SQLite a leer, siempre en modo de solo lectura. Por defecto, `chinook.db` del repositorio. |
 | `--artist-id N` | Solo el artista con ese ID. |
-| `--artist NOMBRE` | Solo el artista con ese nombre exacto, sin distinguir mayúsculas, también en letras con acento (`"ANTÔNIO CARLOS JOBIM"` encuentra a `Antônio Carlos Jobim`). No se puede combinar con `--artist-id` ni con `--artist-contains`. |
-| `--artist-contains TEXTO` | Todos los artistas cuyo nombre contiene el texto, sin distinguir mayúsculas (`jobim` encuentra a `Antônio Carlos Jobim`). Se puede combinar con `--top` y `--sort-by`. No se puede combinar con `--artist-id` ni con `--artist`. |
+| `--artist NOMBRE` | Solo el artista con ese nombre exacto, con sus espacios y signos de puntuación (`acdc` no encuentra a `AC/DC`, `ac/dc` sí), sin distinguir mayúsculas, también en letras con acento (`"ANTÔNIO CARLOS JOBIM"` encuentra a `Antônio Carlos Jobim`). No se puede combinar con `--artist-id` ni con `--artist-contains`. |
+| `--artist-contains TEXTO` | Todos los artistas cuyo nombre contiene el texto, sin distinguir mayúsculas, acentos, espacios ni signos de puntuación (`acdc` encuentra a `AC/DC`, `guns n roses` a `Guns N' Roses` y `antonio` a `Antônio Carlos Jobim`). El texto debe tener al menos una letra o un número. Con textos cortos puede haber más coincidencias, porque la puntuación ya no separa las palabras. Se puede combinar con `--top` y `--sort-by`. No se puede combinar con `--artist-id` ni con `--artist`. |
 | `--top N` | Solo los primeros N según el orden elegido. |
 | `--detail` | Agrega el detalle por álbum: en JSON, una lista `albums` dentro de cada artista; en CSV, una fila por álbum. |
 | `--sort-by CAMPO` | `revenue` (por defecto), `units_sold`, `album_count`, `track_count`, `total_duration_ms`, `avg_track_duration_ms` (de mayor a menor), `name` o `artist_id` (ascendente). Los empates se ordenan por `artist_id`. |

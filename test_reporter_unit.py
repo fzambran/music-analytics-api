@@ -642,3 +642,35 @@ def test_cli_query_error_is_reported_as_a_query_error(
         f"error: no se pudo consultar la base de datos {sample_db_path}: "
         "database is locked\n"
     )
+
+
+# Normalization for --artist-contains
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("AC/DC", "acdc"),
+        ("ac-dc", "acdc"),
+        ("  Guns N' Roses  ", "gunsnroses"),
+        ("Antônio Carlos Jobim", "antoniocarlosjobim"),
+        ("NAÇÃO", "nacao"),
+        ("Motörhead", "motorhead"),
+        ("Straße", "strasse"),  # casefold expands ß
+        ("Earth, Wind & Fire", "earthwindfire"),
+        ("50 Cent", "50cent"),
+        ("ΑΒΓ", "αβγ"),  # other scripts are kept, lowercased
+        ("/-/ ' &", ""),
+        ("", ""),
+    ],
+)
+def test_normalize_for_search(text, expected):
+    assert reporter.normalize_for_search(text) == expected
+
+
+def test_artist_contains_uses_normalization_on_both_sides(memory_db):
+    memory_db.execute("INSERT INTO Artist VALUES (5, 'Café Tacvba'), (6, 'AC/DC')")
+    assert reporter.find_artist_ids_containing(memory_db, "CAFE TACVBA") == [5]
+    assert reporter.find_artist_ids_containing(memory_db, "acdc") == [6]
+    assert reporter.find_artist_ids_containing(memory_db, "c/d") == [6]
+    assert reporter.find_artist_ids_containing(memory_db, "!!!") == []

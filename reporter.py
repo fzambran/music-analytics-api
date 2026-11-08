@@ -15,6 +15,7 @@ import re
 import shutil
 import sqlite3
 import sys
+import unicodedata
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from contextlib import closing
@@ -218,20 +219,36 @@ def find_artist_id(connection: sqlite3.Connection, name: str) -> int | None:
     return None
 
 
-def find_artist_ids_containing(connection: sqlite3.Connection, text: str) -> list[int]:
-    """Return the ids of the artists whose name contains `text`, ignoring case.
+def normalize_for_search(text: str) -> str:
+    """Reduce `text` to lowercase letters and digits without accents.
 
-    Same folding as find_artist_id ("jobim" matches "Antônio Carlos Jobim").
-    Surrounding whitespace is ignored and the ids are in ascending order. Returns
-    an empty list for blank `text` instead of matching every artist.
+    Case, accents, spaces and punctuation are dropped, so "AC/DC", "ac-dc" and
+    "acdc" all become "acdc", and "Antônio" becomes "antonio". Letters of other
+    scripts are kept.
     """
-    wanted = text.strip().casefold()
+    decomposed = unicodedata.normalize("NFKD", text.casefold())
+    return "".join(
+        char
+        for char in decomposed
+        if char.isalnum() and not unicodedata.combining(char)
+    )
+
+
+def find_artist_ids_containing(connection: sqlite3.Connection, text: str) -> list[int]:
+    """Return the ids of the artists whose name contains `text`, in ascending order.
+
+    Both sides go through normalize_for_search, so the match ignores case, accents,
+    spaces and punctuation: "acdc" matches "AC/DC", "guns n roses" matches
+    "Guns N' Roses" and "nacao" matches "Nação Zumbi". Returns an empty list when
+    `text` has no letters or digits instead of matching every artist.
+    """
+    wanted = normalize_for_search(text)
     if not wanted:
         return []
     return [
         artist_id
         for artist_id, artist_name in connection.execute(_NAMED_ARTISTS_SQL)
-        if wanted in artist_name.casefold()
+        if wanted in normalize_for_search(artist_name)
     ]
 
 
@@ -458,9 +475,13 @@ def _positive_int(value: str) -> int:
 
 
 def _search_text(value: str) -> str:
-    """argparse type for a search text that is not blank."""
+    """argparse type for a search text with at least one letter or digit."""
     if not value.strip():
         raise argparse.ArgumentTypeError("el texto de búsqueda no puede estar vacío")
+    if not normalize_for_search(value):
+        raise argparse.ArgumentTypeError(
+            f"{value!r} debe contener al menos una letra o un número"
+        )
     return value
 
 
@@ -540,7 +561,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     artist.add_argument(
         "--artist-contains",
         type=_search_text,
-        help="text contained in the artist name, case-insensitive (all matches)",
+        help=(
+            "text contained in the artist name, ignoring case, accents, spaces and "
+            "punctuation (all matches)"
+        ),
     )
     parser.add_argument("--top", type=_positive_int)
     parser.add_argument("--sort-by", choices=SORT_COLUMNS, default="revenue")
