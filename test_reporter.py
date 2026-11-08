@@ -1,0 +1,360 @@
+"""Integration tests for reporter.py against the real chinook.db."""
+
+import csv
+import json
+from contextlib import closing
+
+import pytest
+
+import reporter
+from db_routes import CHINOOK_DB_PATH, get_db_connection
+from reporter import ArtistStats, find_artist_id, get_artist_stats
+
+
+@pytest.fixture
+def connection():
+    with closing(get_db_connection()) as conn:
+        yield conn
+
+
+@pytest.fixture
+def stats_by_id(connection):
+    return {item.artist_id: item for item in get_artist_stats(connection)}
+
+
+@pytest.fixture
+def detailed_by_id(connection):
+    stats = get_artist_stats(connection, include_albums=True)
+    return {item.artist_id: item for item in stats}
+
+
+def test_one_row_per_artist(connection, stats_by_id):
+    (artist_count,) = connection.execute("SELECT COUNT(*) FROM Artist").fetchone()
+    assert artist_count == 275
+    assert len(stats_by_id) == artist_count
+
+
+def test_no_metric_is_none(stats_by_id):
+    for item in stats_by_id.values():
+        assert None not in vars_of(item).values(), item
+
+
+def test_known_artists(stats_by_id):
+    assert stats_by_id[1] == ArtistStats(
+        artist_id=1,
+        name="AC/DC",
+        album_count=2,
+        track_count=18,
+        total_duration_ms=4853674,
+        avg_track_duration_ms=269649,
+        revenue=15.84,
+        units_sold=16,
+        genres=("Rock",),
+    )
+    assert stats_by_id[90] == ArtistStats(
+        artist_id=90,
+        name="Iron Maiden",
+        album_count=21,
+        track_count=213,
+        total_duration_ms=71844745,
+        avg_track_duration_ms=337299,
+        revenue=138.6,
+        units_sold=140,
+        genres=("Blues", "Heavy Metal", "Metal", "Rock"),
+    )
+
+
+def test_artist_without_albums_has_zeros(stats_by_id):
+    item = stats_by_id[25]
+    assert (
+        item.album_count,
+        item.track_count,
+        item.total_duration_ms,
+        item.avg_track_duration_ms,
+        item.revenue,
+        item.units_sold,
+        item.genres,
+    ) == (0, 0, 0, 0, 0.0, 0, ())
+
+
+def test_totals_match_source_tables(connection, stats_by_id):
+    """Totals equal the raw tables, so no join inflated any count."""
+    rows = stats_by_id.values()
+    (albums,) = connection.execute("SELECT COUNT(*) FROM Album").fetchone()
+    (tracks, total_ms) = connection.execute(
+        "SELECT COUNT(*), SUM(Milliseconds) FROM Track WHERE AlbumId IS NOT NULL"
+    ).fetchone()
+    (units,) = connection.execute("SELECT SUM(Quantity) FROM InvoiceLine").fetchone()
+
+    assert albums == 347
+    assert sum(item.album_count for item in rows) == albums
+    assert sum(item.track_count for item in rows) == tracks
+    assert sum(item.total_duration_ms for item in rows) == total_ms
+    assert sum(item.units_sold for item in rows) == units
+    assert round(sum(item.revenue for item in rows), 2) == 2328.60
+
+
+def test_revenue_has_at_most_two_decimals(stats_by_id):
+    for item in stats_by_id.values():
+        assert round(item.revenue, 2) == item.revenue
+
+
+# Genres
+
+
+def test_genres_are_sorted_distinct_and_exist(connection, stats_by_id):
+    known = {name for (name,) in connection.execute("SELECT Name FROM Genre")}
+    for item in stats_by_id.values():
+        assert list(item.genres) == sorted(set(item.genres)), item.name
+        assert set(item.genres) <= known
+
+
+def test_only_artists_without_tracks_have_no_genres(stats_by_id):
+    for item in stats_by_id.values():
+        assert (item.genres == ()) == (item.track_count == 0), item.name
+
+
+# Per-album detail
+
+
+def test_albums_are_omitted_by_default(stats_by_id):
+    assert all(item.albums is None for item in stats_by_id.values())
+
+
+def test_album_detail_adds_up_to_artist_totals(stats_by_id, detailed_by_id):
+    """For every artist, its albums sum exactly to the artist row."""
+    for artist_id, item in detailed_by_id.items():
+        albums = item.albums
+        assert len(albums) == item.album_count
+        assert sum(album.track_count for album in albums) == item.track_count
+        assert sum(a.total_duration_ms for a in albums) == item.total_duration_ms
+        assert sum(album.units_sold for album in albums) == item.units_sold
+        assert round(sum(album.revenue for album in albums), 2) == item.revenue
+        # The detail does not change the summary fields.
+        summary = stats_by_id[artist_id]
+        assert vars_of(item) == vars_of(summary)
+
+
+def test_album_detail_for_acdc(detailed_by_id):
+    assert [(a.album_id, a.title, a.track_count) for a in detailed_by_id[1].albums] == [
+        (1, "For Those About To Rock We Salute You", 10),
+        (4, "Let There Be Rock", 8),
+    ]
+
+
+def test_album_detail_sorted_by_title(detailed_by_id):
+    for item in detailed_by_id.values():
+        titles = [album.title for album in item.albums]
+        assert titles == sorted(titles), item.name
+
+
+def test_album_detail_empty_for_artist_without_albums(detailed_by_id):
+    assert detailed_by_id[25].albums == ()
+
+
+# Sorting and filtering
+
+
+def test_default_sort_is_revenue_desc_with_id_tiebreak(connection):
+    stats = get_artist_stats(connection)
+    assert stats[0].artist_id == 90
+    keys = [(-item.revenue, item.artist_id) for item in stats]
+    assert keys == sorted(keys)
+
+
+def test_top_three_by_revenue(connection):
+    assert [item.artist_id for item in get_artist_stats(connection, top=3)] == [
+        90,
+        150,
+        50,
+    ]
+
+
+def test_top_with_detail_only_loads_selected_artists(connection):
+    stats = get_artist_stats(connection, top=2, include_albums=True)
+    assert [item.artist_id for item in stats] == [90, 150]
+    assert [len(item.albums) for item in stats] == [21, 10]
+
+
+def test_sort_by_name_is_case_insensitive(connection):
+    def ascii_casefold(name: str) -> str:
+        return "".join(char.lower() if char.isascii() else char for char in name)
+
+    names = [item.name for item in get_artist_stats(connection, sort_by="name")]
+    assert names == sorted(names, key=ascii_casefold)
+    assert names.index("Aaron Copland & London Symphony Orchestra") < names.index(
+        "AC/DC"
+    )
+
+
+@pytest.mark.parametrize("sort_by", ["album_count", "track_count", "units_sold"])
+def test_numeric_sorts_are_descending(connection, sort_by):
+    values = [
+        getattr(item, sort_by) for item in get_artist_stats(connection, sort_by=sort_by)
+    ]
+    assert values == sorted(values, reverse=True)
+
+
+def test_filter_by_artist_id(connection):
+    stats = get_artist_stats(connection, artist_id=1)
+    assert [item.name for item in stats] == ["AC/DC"]
+
+
+def test_unknown_artist_returns_empty_list(connection):
+    assert get_artist_stats(connection, artist_id=999999) == []
+    assert get_artist_stats(connection, artist_id=999999, include_albums=True) == []
+
+
+def test_invalid_sort_by_raises(connection):
+    with pytest.raises(ValueError, match="sort_by"):
+        get_artist_stats(connection, sort_by="bogus")
+
+
+def test_invalid_top_raises(connection):
+    with pytest.raises(ValueError, match="top"):
+        get_artist_stats(connection, top=0)
+
+
+# Search by name
+
+
+@pytest.mark.parametrize(
+    ("name", "expected_id"),
+    [
+        ("AC/DC", 1),
+        ("ac/dc", 1),
+        ("  Iron Maiden  ", 90),
+        ("ANTÔNIO CARLOS JOBIM", 6),  # SQLite LOWER/NOCASE would miss this one
+    ],
+)
+def test_find_artist_id_ignores_case_and_accents_case(connection, name, expected_id):
+    assert find_artist_id(connection, name) == expected_id
+
+
+@pytest.mark.parametrize("name", ["Iron", "Nobody", "", "   "])
+def test_find_artist_id_requires_full_match(connection, name):
+    assert find_artist_id(connection, name) is None
+
+
+# CLI
+
+
+def test_cli_json_to_stdout(capsys):
+    assert reporter.main(["--format", "json", "--top", "2"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert [row["artist_id"] for row in data] == [90, 150]
+    assert list(data[0]) == list(reporter.FIELDS)
+    assert data[0]["genres"] == ["Blues", "Heavy Metal", "Metal", "Rock"]
+
+
+def test_cli_csv_to_file(tmp_path):
+    output = tmp_path / "artists.csv"
+    assert reporter.main(["--format", "csv", "--output", str(output)]) == 0
+    with output.open(encoding="utf-8", newline="") as file:
+        rows = list(csv.DictReader(file))
+    assert len(rows) == 275
+    assert rows[0]["name"] == "Iron Maiden"
+    assert rows[0]["revenue"] == "138.60"
+    assert rows[0]["genres"] == "Blues; Heavy Metal; Metal; Rock"
+
+
+def test_cli_search_by_name(capsys):
+    assert reporter.main(["--format", "json", "--artist", "iron maiden"]) == 0
+    (row,) = json.loads(capsys.readouterr().out)
+    assert row["artist_id"] == 90
+
+
+def test_cli_unknown_artist_name_exits_1(capsys):
+    assert reporter.main(["--format", "json", "--artist", "Nobody"]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "artist 'Nobody' not found" in captured.err
+
+
+def test_cli_json_detail_nests_albums(capsys):
+    assert reporter.main(["--format", "json", "--artist-id", "1", "--detail"]) == 0
+    (row,) = json.loads(capsys.readouterr().out)
+    assert [album["title"] for album in row["albums"]] == [
+        "For Those About To Rock We Salute You",
+        "Let There Be Rock",
+    ]
+
+
+def test_cli_csv_detail_has_one_row_per_album(tmp_path):
+    output = tmp_path / "albums.csv"
+    assert reporter.main(["--format", "csv", "--detail", "--output", str(output)]) == 0
+    with output.open(encoding="utf-8", newline="") as file:
+        reader = csv.DictReader(file)
+        rows = list(reader)
+    assert tuple(reader.fieldnames) == reporter.ALBUM_FIELDS
+    assert len(rows) == 347
+    assert {row["album_id"] for row in rows} == {str(i) for i in range(1, 348)}
+
+
+def test_cli_unknown_artist_exits_1(capsys):
+    assert reporter.main(["--format", "json", "--artist-id", "999999"]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "artist 999999 not found" in captured.err
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--format", "xml"],
+        ["--format", "json", "--sort-by", "bogus"],
+        ["--format", "json", "--top", "0"],
+        ["--format", "json", "--artist-id", "-1"],
+        ["--format", "json", "--top", "abc"],
+        ["--format", "json", "--artist-id", "1", "--artist", "AC/DC"],
+        [],
+    ],
+)
+def test_cli_invalid_arguments_exit_2(argv, capsys):
+    with pytest.raises(SystemExit) as excinfo:
+        reporter.main(argv)
+    assert excinfo.value.code == 2
+
+
+def test_cli_explicit_db_path(capsys):
+    argv = ["--format", "json", "--top", "1", "--db", str(CHINOOK_DB_PATH)]
+    assert reporter.main(argv) == 0
+    assert json.loads(capsys.readouterr().out)[0]["artist_id"] == 90
+
+
+def test_cli_missing_database_exits_1(tmp_path, capsys):
+    missing = tmp_path / "missing.db"
+    assert reporter.main(["--format", "json", "--db", str(missing)]) == 1
+    assert "no se pudo abrir la base de datos" in capsys.readouterr().err
+    assert not missing.exists()  # read-only mode never creates the file
+
+
+def test_cli_corrupt_database_exits_1(tmp_path, capsys):
+    corrupt = tmp_path / "corrupt.db"
+    corrupt.write_bytes(b"this is not a sqlite database" * 100)
+    assert reporter.main(["--format", "json", "--db", str(corrupt)]) == 1
+    assert "no se pudo abrir la base de datos" in capsys.readouterr().err
+
+
+def test_cli_creates_missing_output_directories(tmp_path):
+    output = tmp_path / "reports" / "2026" / "artists.json"
+    assert reporter.main(["--format", "json", "--output", str(output)]) == 0
+    assert len(json.loads(output.read_text(encoding="utf-8"))) == 275
+
+
+def test_cli_output_is_a_directory_exits_1(tmp_path, capsys):
+    assert reporter.main(["--format", "json", "--output", str(tmp_path)]) == 1
+    assert "no se pudo escribir" in capsys.readouterr().err
+
+
+def test_cli_output_parent_is_a_file_exits_1(tmp_path, capsys):
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("x", encoding="utf-8")
+    output = blocker / "artists.json"
+    assert reporter.main(["--format", "json", "--output", str(output)]) == 1
+    assert "no se pudo escribir" in capsys.readouterr().err
+
+
+def vars_of(item: ArtistStats) -> dict:
+    """Summary field values of an ArtistStats (slots dataclasses have no __dict__)."""
+    return {name: getattr(item, name) for name in reporter.FIELDS}
