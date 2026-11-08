@@ -74,6 +74,7 @@ curl localhost:5000/db/artists/999999/albums
 uv run python reporter.py --format json --top 5                # los 5 con más ingresos, a stdout
 uv run python reporter.py --format csv --output artistas.csv   # todos los artistas a un archivo
 uv run python reporter.py --format json --artist-id 90         # un solo artista por ID
+uv run python reporter.py --format csv --artist-contains orchestra   # todos los que contienen el texto
 uv run python reporter.py --format json --artist "iron maiden" --detail   # por nombre, con detalle por álbum
 uv run python reporter.py --format csv --detail --output reportes/albumes.csv   # una fila por álbum
 ```
@@ -84,7 +85,8 @@ uv run python reporter.py --format csv --detail --output reportes/albumes.csv   
 | `--output RUTA` | Archivo de salida en UTF-8. Crea los directorios que falten. Si se omite, escribe a stdout. |
 | `--db RUTA` | Base SQLite a leer, siempre en modo de solo lectura. Por defecto, `chinook.db` del repositorio. |
 | `--artist-id N` | Solo el artista con ese ID. |
-| `--artist NOMBRE` | Solo el artista con ese nombre exacto, sin distinguir mayúsculas, también en letras con acento (`"ANTÔNIO CARLOS JOBIM"` encuentra a `Antônio Carlos Jobim`). No se puede combinar con `--artist-id`. |
+| `--artist NOMBRE` | Solo el artista con ese nombre exacto, sin distinguir mayúsculas, también en letras con acento (`"ANTÔNIO CARLOS JOBIM"` encuentra a `Antônio Carlos Jobim`). No se puede combinar con `--artist-id` ni con `--artist-contains`. |
+| `--artist-contains TEXTO` | Todos los artistas cuyo nombre contiene el texto, sin distinguir mayúsculas (`jobim` encuentra a `Antônio Carlos Jobim`). Se puede combinar con `--top` y `--sort-by`. No se puede combinar con `--artist-id` ni con `--artist`. |
 | `--top N` | Solo los primeros N según el orden elegido. |
 | `--detail` | Agrega el detalle por álbum: en JSON, una lista `albums` dentro de cada artista; en CSV, una fila por álbum. |
 | `--sort-by CAMPO` | `revenue` (por defecto), `units_sold`, `album_count`, `track_count`, `total_duration_ms`, `avg_track_duration_ms` (de mayor a menor), `name` o `artist_id` (ascendente). Los empates se ordenan por `artist_id`. |
@@ -109,7 +111,11 @@ Con `--detail`, cada álbum tiene `album_id`, `title`, `track_count`, `total_dur
 ]
 ```
 
-Códigos de salida: `0` si todo salió bien; `1` si no se pudo abrir la base de datos, el artista no existe o no se pudo escribir el archivo; `2` si los argumentos son inválidos.
+Antes de consultar, el reporte comprueba que la base tenga las tablas y columnas de Chinook que necesita (`Artist`, `Album`, `Track`, `Genre`, `InvoiceLine`). Si faltan, el error indica cuáles, por ejemplo: `error: otra.db no es una base Chinook válida: falta la tabla Artist`.
+
+Todos los mensajes de error están en español, también los de argumentos inválidos (por ejemplo, `error: argumento --top: '0' debe ser mayor o igual que 1`). Si no hay resultados para el artista pedido, el mensaje es `error: no se encontró el artista 'X'`, `error: no se encontró el artista con ID N` o `error: ningún artista contiene 'X' en el nombre`.
+
+Códigos de salida: `0` si todo salió bien; `1` si no se pudo abrir la base de datos, la base no tiene el esquema de Chinook, el artista no existe o no se pudo escribir el archivo; `2` si los argumentos son inválidos.
 
 ## Estructura del proyecto
 

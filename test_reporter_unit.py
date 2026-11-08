@@ -14,10 +14,14 @@ from reporter import (
     FIELDS,
     AlbumStats,
     ArtistStats,
+    SchemaError,
+    export,
     find_artist_id,
     get_artist_stats,
     to_csv,
     to_json,
+    validate_schema,
+    write_output,
 )
 
 SAMPLE = [
@@ -285,3 +289,132 @@ def test_cli_never_writes_to_the_database(sample_db_path):
     before = sample_db_path.read_bytes()
     reporter.main(["--format", "json", "--db", str(sample_db_path), "--detail"])
     assert sample_db_path.read_bytes() == before
+
+
+# Schema validation
+
+
+def test_validate_schema_accepts_sample_db(memory_db):
+    validate_schema(memory_db)
+
+
+def test_validate_schema_lists_every_missing_table():
+    with closing(sqlite3.connect(":memory:")) as conn:
+        conn.execute("CREATE TABLE Unrelated (x)")
+        with pytest.raises(SchemaError) as excinfo:
+            validate_schema(conn)
+    message = str(excinfo.value)
+    for table in reporter.REQUIRED_SCHEMA:
+        assert f"falta la tabla {table}" in message
+
+
+def test_validate_schema_lists_missing_columns(memory_db):
+    memory_db.executescript(
+        """
+        DROP TABLE Track;
+        CREATE TABLE Track (TrackId INTEGER, AlbumId INTEGER);
+        DROP TABLE Genre;
+        """
+    )
+    with pytest.raises(SchemaError) as excinfo:
+        validate_schema(memory_db)
+    assert str(excinfo.value) == (
+        "faltan columnas en Track: GenreId, Milliseconds; falta la tabla Genre"
+    )
+
+
+def test_validate_schema_ignores_name_case():
+    with closing(sqlite3.connect(":memory:")) as conn:
+        for table, columns in reporter.REQUIRED_SCHEMA.items():
+            conn.execute(
+                f"CREATE TABLE {table.lower()} ({', '.join(c.upper() for c in columns)})"
+            )
+        validate_schema(conn)
+
+
+def test_validate_schema_does_not_require_extra_tables(memory_db):
+    """Customer, Invoice, Playlist... are not read by the report."""
+    validate_schema(memory_db)
+    assert "Invoice" not in reporter.REQUIRED_SCHEMA
+
+
+# export / write_output
+
+
+@pytest.mark.parametrize("fmt", ["json", "csv"])
+def test_export_matches_the_exporters(fmt):
+    expected = io.StringIO()
+    (to_json if fmt == "json" else to_csv)(SAMPLE, expected)
+    buffer = io.StringIO()
+    export(SAMPLE, buffer, fmt=fmt)
+    assert buffer.getvalue() == expected.getvalue()
+
+
+def test_export_csv_detail():
+    buffer = io.StringIO()
+    export(DETAILED, buffer, fmt="csv", detail=True)
+    header, rows = csv_rows(buffer.getvalue())
+    assert header == ALBUM_FIELDS
+    assert len(rows) == 2
+
+
+def test_export_rejects_unknown_format():
+    with pytest.raises(ValueError, match="format"):
+        export(SAMPLE, io.StringIO(), fmt="xml")
+
+
+def test_write_output_creates_directories_and_writes_utf8(tmp_path):
+    path = tmp_path / "a" / "b" / "artists.json"
+    write_output(path, SAMPLE, fmt="json")
+    data = json.loads(path.read_bytes().decode("utf-8"))
+    assert data[2]["name"] == "Antônio Carlos Jobim"
+
+
+def test_write_output_csv_has_no_blank_lines(tmp_path):
+    path = tmp_path / "artists.csv"
+    write_output(path, SAMPLE, fmt="csv")
+    raw = path.read_bytes()
+    assert b"\r\r" not in raw and b"\n\n" not in raw
+    assert raw.count(b"\r\n") == len(SAMPLE) + 1  # csv module line endings
+
+
+def test_write_output_overwrites_existing_file(tmp_path):
+    path = tmp_path / "artists.json"
+    path.write_text("old content that is longer than the new one" * 100)
+    write_output(path, [], fmt="json")
+    assert json.loads(path.read_text(encoding="utf-8")) == []
+
+
+def test_write_output_raises_oserror_when_path_is_a_directory(tmp_path):
+    with pytest.raises(OSError):
+        write_output(tmp_path, SAMPLE, fmt="json")
+
+
+def test_write_output_raises_oserror_when_parent_is_a_file(tmp_path):
+    blocker = tmp_path / "file"
+    blocker.write_text("x")
+    with pytest.raises(OSError):
+        write_output(blocker / "artists.json", SAMPLE, fmt="json")
+
+
+def test_cli_rejects_database_without_chinook_schema(tmp_path, capsys):
+    path = tmp_path / "other.db"
+    with closing(sqlite3.connect(path)) as conn:
+        conn.execute("CREATE TABLE Unrelated (x)")
+    assert reporter.main(["--format", "json", "--db", str(path)]) == 1
+    err = capsys.readouterr().err
+    assert f"{path} no es una base Chinook válida" in err
+    assert "falta la tabla Artist" in err
+    assert "no se pudo abrir" not in err
+
+
+def test_cli_partial_schema_names_missing_columns(sample_db_path, capsys):
+    with closing(sqlite3.connect(sample_db_path)) as conn:
+        conn.executescript(
+            """
+            ALTER TABLE InvoiceLine RENAME TO InvoiceLine_old;
+            CREATE TABLE InvoiceLine (TrackId INTEGER, Quantity INTEGER);
+            """
+        )
+    assert reporter.main(["--format", "json", "--db", str(sample_db_path)]) == 1
+    assert "faltan columnas en InvoiceLine: UnitPrice" in capsys.readouterr().err

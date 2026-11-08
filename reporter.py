@@ -2,12 +2,14 @@
 
 Usage:
     uv run python reporter.py --format {json,csv} [--output PATH] [--db PATH]
-        [--artist-id N | --artist NAME] [--top N] [--sort-by FIELD] [--detail]
+        [--artist-id N | --artist NAME | --artist-contains TEXT]
+        [--top N] [--sort-by FIELD] [--detail]
 """
 
 import argparse
 import csv
 import json
+import re
 import sqlite3
 import sys
 from collections import defaultdict
@@ -15,9 +17,23 @@ from collections.abc import Iterable, Sequence
 from contextlib import closing
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
-from typing import TextIO
+from typing import NoReturn, TextIO
 
-from db_routes import get_db_connection
+from db_routes import CHINOOK_DB_PATH, get_db_connection
+
+# Tables and columns the report reads. validate_schema checks them up front so a
+# SQLite file that is not a Chinook database gets a clear error.
+REQUIRED_SCHEMA: dict[str, tuple[str, ...]] = {
+    "Artist": ("ArtistId", "Name"),
+    "Album": ("AlbumId", "Title", "ArtistId"),
+    "Track": ("TrackId", "AlbumId", "GenreId", "Milliseconds"),
+    "Genre": ("GenreId", "Name"),
+    "InvoiceLine": ("TrackId", "UnitPrice", "Quantity"),
+}
+
+
+class SchemaError(Exception):
+    """The database opened but lacks tables or columns the report needs."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,6 +163,31 @@ ORDER BY al.ArtistId, al.Title, al.AlbumId
 """
 
 
+def validate_schema(connection: sqlite3.Connection) -> None:
+    """Raise SchemaError if any table or column in REQUIRED_SCHEMA is missing.
+
+    The message lists every missing table and column, not just the first one.
+    Table and column names are compared case-insensitively, as SQLite does.
+    sqlite3.DatabaseError propagates if the file is not a SQLite database.
+    """
+    problems = []
+    for table, columns in REQUIRED_SCHEMA.items():
+        existing = {
+            name.casefold()
+            for (name,) in connection.execute(
+                "SELECT name FROM pragma_table_info(?)", (table,)
+            )
+        }
+        if not existing:
+            problems.append(f"falta la tabla {table}")
+            continue
+        missing = [column for column in columns if column.casefold() not in existing]
+        if missing:
+            problems.append(f"faltan columnas en {table}: {', '.join(missing)}")
+    if problems:
+        raise SchemaError("; ".join(problems))
+
+
 def _cents_to_amount(cents: int) -> float:
     """Convert integer cents to an amount rounded to 2 decimals."""
     return round(cents / 100, 2)
@@ -168,6 +209,25 @@ def find_artist_id(connection: sqlite3.Connection, name: str) -> int | None:
         if artist_name.casefold() == wanted:
             return artist_id
     return None
+
+
+def find_artist_ids_containing(connection: sqlite3.Connection, text: str) -> list[int]:
+    """Return the ids of the artists whose name contains `text`, ignoring case.
+
+    Same folding as find_artist_id ("jobim" matches "Antônio Carlos Jobim").
+    Surrounding whitespace is ignored and the ids are in ascending order. Returns
+    an empty list for blank `text` instead of matching every artist.
+    """
+    wanted = text.strip().casefold()
+    if not wanted:
+        return []
+    return [
+        artist_id
+        for artist_id, artist_name in connection.execute(
+            "SELECT ArtistId, Name FROM Artist ORDER BY ArtistId"
+        )
+        if wanted in artist_name.casefold()
+    ]
 
 
 def _genres_by_artist(
@@ -205,6 +265,7 @@ def get_artist_stats(
     connection: sqlite3.Connection,
     *,
     artist_id: int | None = None,
+    artist_ids: Iterable[int] | None = None,
     top: int | None = None,
     sort_by: str = "revenue",
     include_albums: bool = False,
@@ -213,9 +274,11 @@ def get_artist_stats(
 
     Each artist includes its genres; with `include_albums=True` it also includes the
     per-album detail. Artists without albums or sales are included with zeros.
-    Returns an empty list if `artist_id` does not exist. Raises ValueError for an
-    unknown `sort_by` or a `top` smaller than 1. The connection is neither opened
-    nor closed here.
+    `artist_id` restricts the result to one artist and `artist_ids` to several (an
+    empty `artist_ids` returns []); unknown ids are simply absent from the result.
+    `top` applies after that filter. Raises ValueError for an unknown `sort_by`, a
+    `top` smaller than 1 or both `artist_id` and `artist_ids`. The connection is
+    neither opened nor closed here.
     """
     if sort_by not in SORT_COLUMNS:
         raise ValueError(
@@ -223,6 +286,8 @@ def get_artist_stats(
         )
     if top is not None and top < 1:
         raise ValueError(f"top must be >= 1, got {top}")
+    if artist_id is not None and artist_ids is not None:
+        raise ValueError("Pass artist_id or artist_ids, not both")
 
     column, direction = SORT_COLUMNS[sort_by]
     sql = _STATS_SQL
@@ -230,6 +295,12 @@ def get_artist_stats(
     if artist_id is not None:
         sql += "WHERE ar.ArtistId = ?\n"
         params.append(artist_id)
+    elif artist_ids is not None:
+        ids = list(artist_ids)
+        if not ids:
+            return []
+        sql += f"WHERE ar.ArtistId IN ({', '.join('?' * len(ids))})\n"
+        params.extend(ids)
     sql += f"ORDER BY {column} {direction}, ar.ArtistId\n"
     if top is not None:
         sql += "LIMIT ?\n"
@@ -305,12 +376,33 @@ def to_csv(stats: Iterable[ArtistStats], file: TextIO, *, detail: bool = False) 
         writer.writerow(row)
 
 
-def _export(stats: list[ArtistStats], file: TextIO, args: argparse.Namespace) -> None:
-    """Write `stats` to `file` in the format requested on the command line."""
-    if args.format == "json":
+def export(
+    stats: Iterable[ArtistStats], file: TextIO, *, fmt: str, detail: bool = False
+) -> None:
+    """Write `stats` to an open text `file` as "json" or "csv".
+
+    `detail` only affects CSV (one row per album); JSON nests albums whenever the
+    stats include them. Raises ValueError for an unknown format.
+    """
+    if fmt == "json":
         to_json(stats, file)
+    elif fmt == "csv":
+        to_csv(stats, file, detail=detail)
     else:
-        to_csv(stats, file, detail=args.detail)
+        raise ValueError(f"Invalid format {fmt!r}; expected 'json' or 'csv'")
+
+
+def write_output(
+    path: Path, stats: Iterable[ArtistStats], *, fmt: str, detail: bool = False
+) -> None:
+    """Write `stats` to the file at `path` (UTF-8), creating missing directories.
+
+    The file is opened with newline="" so CSV rows get no extra blank lines on
+    Windows. OSError propagates (e.g. `path` is a directory or a parent is a file).
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as file:
+        export(stats, file, fmt=fmt, detail=detail)
 
 
 def _positive_int(value: str) -> int:
@@ -318,15 +410,76 @@ def _positive_int(value: str) -> int:
     try:
         number = int(value)
     except ValueError:
-        raise argparse.ArgumentTypeError(f"{value!r} is not an integer") from None
+        raise argparse.ArgumentTypeError(f"{value!r} no es un número entero") from None
     if number < 1:
-        raise argparse.ArgumentTypeError(f"{value!r} must be >= 1")
+        raise argparse.ArgumentTypeError(f"{value!r} debe ser mayor o igual que 1")
     return number
+
+
+def _search_text(value: str) -> str:
+    """argparse type for a search text that is not blank."""
+    if not value.strip():
+        raise argparse.ArgumentTypeError("el texto de búsqueda no puede estar vacío")
+    return value
+
+
+# argparse's own error messages (Python 3.12 templates) translated to Spanish.
+# Anything not listed here is shown untranslated rather than hidden.
+_ARGPARSE_TRANSLATIONS: tuple[tuple[re.Pattern[str], str], ...] = tuple(
+    (re.compile(pattern), replacement)
+    for pattern, replacement in (
+        (
+            r"^invalid choice: (?P<value>.+) \(choose from (?P<choices>.+)\)$",
+            r"valor inválido: \g<value> (opciones: \g<choices>)",
+        ),
+        (r"^expected one argument$", "se esperaba un valor"),
+        (
+            r"^not allowed with argument (?P<other>.+)$",
+            r"no se puede combinar con \g<other>",
+        ),
+        (r"^invalid \S+ value: (?P<value>.+)$", r"valor inválido: \g<value>"),
+        (
+            r"^the following arguments are required: (?P<args>.+)$",
+            r"faltan argumentos obligatorios: \g<args>",
+        ),
+        (
+            r"^unrecognized arguments: (?P<args>.+)$",
+            r"argumentos no reconocidos: \g<args>",
+        ),
+        (
+            r"^ambiguous option: (?P<option>\S+) could match (?P<matches>.+)$",
+            r"opción ambigua: \g<option> puede ser \g<matches>",
+        ),
+    )
+)
+_ARGUMENT_PREFIX = re.compile(r"^argument (?P<argument>[^:]+): (?P<message>.+)$")
+
+
+def _translate_argparse_message(message: str) -> str:
+    """Translate an argparse error message to Spanish, keeping unknown ones as is."""
+    prefix = ""
+    match = _ARGUMENT_PREFIX.match(message)
+    if match:
+        prefix = f"argumento {match['argument']}: "
+        message = match["message"]
+    for pattern, replacement in _ARGPARSE_TRANSLATIONS:
+        if pattern.match(message):
+            return prefix + pattern.sub(replacement, message)
+    return prefix + message
+
+
+class _SpanishArgumentParser(argparse.ArgumentParser):
+    """ArgumentParser whose usage errors are printed in Spanish."""
+
+    def error(self, message: str) -> NoReturn:
+        """Print the usage and the translated error to stderr, then exit with 2."""
+        usage = self.format_usage().replace("usage: ", "uso: ", 1)
+        self.exit(2, f"{usage}error: {_translate_argparse_message(message)}\n")
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     """Parse the command-line arguments of the reporter."""
-    parser = argparse.ArgumentParser(
+    parser = _SpanishArgumentParser(
         description="Per-artist statistics from chinook.db exported to JSON or CSV."
     )
     parser.add_argument("--format", required=True, choices=("json", "csv"))
@@ -343,6 +496,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     artist = parser.add_mutually_exclusive_group()
     artist.add_argument("--artist-id", type=_positive_int)
     artist.add_argument("--artist", help="artist name, case-insensitive exact match")
+    artist.add_argument(
+        "--artist-contains",
+        type=_search_text,
+        help="text contained in the artist name, case-insensitive (all matches)",
+    )
     parser.add_argument("--top", type=_positive_int)
     parser.add_argument("--sort-by", choices=SORT_COLUMNS, default="revenue")
     parser.add_argument(
@@ -356,37 +514,58 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the reporter CLI and return the process exit code."""
     args = parse_args(argv)
+    db_path = args.db if args.db is not None else CHINOOK_DB_PATH
 
     try:
         with closing(get_db_connection(args.db)) as connection:
+            validate_schema(connection)
             artist_id = args.artist_id
+            artist_ids = None
             if args.artist is not None:
                 artist_id = find_artist_id(connection, args.artist)
                 if artist_id is None:
-                    print(f"error: artist {args.artist!r} not found", file=sys.stderr)
+                    print(
+                        f"error: no se encontró el artista {args.artist!r}",
+                        file=sys.stderr,
+                    )
+                    return 1
+            elif args.artist_contains is not None:
+                artist_ids = find_artist_ids_containing(
+                    connection, args.artist_contains
+                )
+                if not artist_ids:
+                    print(
+                        f"error: ningún artista contiene {args.artist_contains!r}"
+                        " en el nombre",
+                        file=sys.stderr,
+                    )
                     return 1
             stats = get_artist_stats(
                 connection,
                 artist_id=artist_id,
+                artist_ids=artist_ids,
                 top=args.top,
                 sort_by=args.sort_by,
                 include_albums=args.detail,
             )
+    except SchemaError as error:
+        print(
+            f"error: {db_path} no es una base Chinook válida: {error}", file=sys.stderr
+        )
+        return 1
     except sqlite3.Error as error:
         print(f"error: no se pudo abrir la base de datos: {error}", file=sys.stderr)
         return 1
 
     if artist_id is not None and not stats:
-        print(f"error: artist {artist_id} not found", file=sys.stderr)
+        print(f"error: no se encontró el artista con ID {artist_id}", file=sys.stderr)
         return 1
 
     if args.output is None:
-        _export(stats, sys.stdout, args)
+        export(stats, sys.stdout, fmt=args.format, detail=args.detail)
         return 0
     try:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        with args.output.open("w", encoding="utf-8", newline="") as file:
-            _export(stats, file, args)
+        write_output(args.output, stats, fmt=args.format, detail=args.detail)
     except OSError as error:
         print(f"error: no se pudo escribir {args.output}: {error}", file=sys.stderr)
         return 1

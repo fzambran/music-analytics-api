@@ -8,7 +8,13 @@ import pytest
 
 import reporter
 from db_routes import CHINOOK_DB_PATH, get_db_connection
-from reporter import ArtistStats, find_artist_id, get_artist_stats
+from reporter import (
+    ArtistStats,
+    find_artist_id,
+    find_artist_ids_containing,
+    get_artist_stats,
+    validate_schema,
+)
 
 
 @pytest.fixture
@@ -268,7 +274,7 @@ def test_cli_unknown_artist_name_exits_1(capsys):
     assert reporter.main(["--format", "json", "--artist", "Nobody"]) == 1
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "artist 'Nobody' not found" in captured.err
+    assert captured.err == "error: no se encontró el artista 'Nobody'\n"
 
 
 def test_cli_json_detail_nests_albums(capsys):
@@ -295,7 +301,7 @@ def test_cli_unknown_artist_exits_1(capsys):
     assert reporter.main(["--format", "json", "--artist-id", "999999"]) == 1
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "artist 999999 not found" in captured.err
+    assert captured.err == "error: no se encontró el artista con ID 999999\n"
 
 
 @pytest.mark.parametrize(
@@ -333,7 +339,9 @@ def test_cli_corrupt_database_exits_1(tmp_path, capsys):
     corrupt = tmp_path / "corrupt.db"
     corrupt.write_bytes(b"this is not a sqlite database" * 100)
     assert reporter.main(["--format", "json", "--db", str(corrupt)]) == 1
-    assert "no se pudo abrir la base de datos" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "no se pudo abrir la base de datos" in err
+    assert "no es una base Chinook" not in err
 
 
 def test_cli_creates_missing_output_directories(tmp_path):
@@ -358,3 +366,136 @@ def test_cli_output_parent_is_a_file_exits_1(tmp_path, capsys):
 def vars_of(item: ArtistStats) -> dict:
     """Summary field values of an ArtistStats (slots dataclasses have no __dict__)."""
     return {name: getattr(item, name) for name in reporter.FIELDS}
+
+
+def test_real_chinook_db_passes_schema_validation(connection):
+    validate_schema(connection)
+
+
+def test_cli_empty_sqlite_file_is_not_chinook(tmp_path, capsys):
+    """A zero-byte file is a valid, empty SQLite database for SQLite."""
+    empty = tmp_path / "empty.db"
+    empty.touch()
+    assert reporter.main(["--format", "json", "--db", str(empty)]) == 1
+    assert "no es una base Chinook válida" in capsys.readouterr().err
+
+
+# Partial search
+
+
+@pytest.mark.parametrize(
+    ("text", "expected_ids"),
+    [
+        ("jobim", [6]),
+        ("JOBIM", [6]),
+        ("  Iron Maiden  ", [90]),
+        ("NAÇÃO", [18, 191]),  # non-ASCII folding: both "... Nação Zumbi" artists
+    ],
+)
+def test_find_artist_ids_containing(connection, text, expected_ids):
+    assert find_artist_ids_containing(connection, text) == expected_ids
+
+
+def test_find_artist_ids_containing_returns_every_match_in_id_order(connection):
+    ids = find_artist_ids_containing(connection, "orchestra")
+    names = {
+        artist_id: name
+        for artist_id, name in connection.execute("SELECT ArtistId, Name FROM Artist")
+    }
+    expected = sorted(i for i, name in names.items() if "orchestra" in name.casefold())
+    assert len(expected) > 5
+    assert ids == expected
+
+
+@pytest.mark.parametrize("text", ["", "   ", "zzz-no-artist"])
+def test_find_artist_ids_containing_no_match(connection, text):
+    assert find_artist_ids_containing(connection, text) == []
+
+
+def test_get_artist_stats_filters_by_several_ids(connection):
+    stats = get_artist_stats(connection, artist_ids=[1, 90, 999999])
+    assert [item.artist_id for item in stats] == [90, 1]  # sorted by revenue
+
+
+def test_get_artist_stats_top_applies_after_the_id_filter(connection):
+    stats = get_artist_stats(connection, artist_ids=[1, 50, 90, 150], top=2)
+    assert [item.artist_id for item in stats] == [90, 150]
+
+
+def test_get_artist_stats_empty_id_list_returns_empty(connection):
+    assert get_artist_stats(connection, artist_ids=[]) == []
+
+
+def test_get_artist_stats_rejects_artist_id_and_artist_ids(connection):
+    with pytest.raises(ValueError, match="artist_id"):
+        get_artist_stats(connection, artist_id=1, artist_ids=[1])
+
+
+def test_cli_artist_contains_returns_all_matches(capsys):
+    assert reporter.main(["--format", "json", "--artist-contains", "iron"]) == 0
+    names = [row["name"] for row in json.loads(capsys.readouterr().out)]
+    assert "Iron Maiden" in names
+    assert all("iron" in name.casefold() for name in names)
+
+
+def test_cli_artist_contains_with_sort_and_top(capsys):
+    argv = ["--format", "json", "--artist-contains", "a", "--sort-by", "name"]
+    assert reporter.main([*argv, "--top", "3"]) == 0
+    names = [row["name"] for row in json.loads(capsys.readouterr().out)]
+    assert len(names) == 3
+    assert names == sorted(names, key=str.casefold)
+
+
+def test_cli_artist_contains_without_matches_exits_1(capsys):
+    assert reporter.main(["--format", "json", "--artist-contains", "zzz"]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "error: ningún artista contiene 'zzz' en el nombre\n"
+
+
+# Spanish error messages
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        (
+            ["--format", "xml"],
+            "error: argumento --format: valor inválido: 'xml' (opciones: json, csv)",
+        ),
+        (
+            ["--format", "json", "--top", "abc"],
+            "error: argumento --top: 'abc' no es un número entero",
+        ),
+        (
+            ["--format", "json", "--top", "0"],
+            "error: argumento --top: '0' debe ser mayor o igual que 1",
+        ),
+        (["--format", "json", "--top"], "error: argumento --top: se esperaba un valor"),
+        (
+            ["--format", "json", "--artist-contains", " "],
+            "error: argumento --artist-contains: el texto de búsqueda no puede estar vacío",
+        ),
+        (
+            ["--format", "json", "--artist-id", "1", "--artist", "AC/DC"],
+            "error: argumento --artist: no se puede combinar con --artist-id",
+        ),
+        ([], "error: faltan argumentos obligatorios: --format"),
+        (["--format", "json", "--bogus"], "error: argumentos no reconocidos: --bogus"),
+    ],
+)
+def test_cli_usage_errors_are_in_spanish(argv, expected, capsys):
+    with pytest.raises(SystemExit) as excinfo:
+        reporter.main(argv)
+    assert excinfo.value.code == 2
+    err = capsys.readouterr().err
+    assert err.startswith("uso: ")
+    assert err.rstrip("\n").splitlines()[-1] == expected
+
+
+def test_untranslated_argparse_messages_are_kept():
+    assert reporter._translate_argparse_message("something new") == "something new"
+    assert (
+        reporter._translate_argparse_message("argument --x: something new")
+        == "argumento --x: something new"
+    )
