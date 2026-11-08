@@ -66,6 +66,43 @@ curl localhost:5000/db/artists/999999/albums
 # {"error": "Artist not found"}   (HTTP 404)
 ```
 
+## Reporte de artistas
+
+`reporter.py` genera estadísticas por artista a partir de `chinook.db` y las exporta a JSON o CSV. Incluye a todos los artistas, también a los que no tienen álbumes ni ventas (con valores en 0).
+
+```sh
+uv run python reporter.py --format json --top 5                # los 5 con más ingresos, a stdout
+uv run python reporter.py --format csv --output artistas.csv   # todos los artistas a un archivo
+uv run python reporter.py --format json --artist-id 90         # un solo artista
+```
+
+| Opción | Descripción |
+|---|---|
+| `--format {json,csv}` | Formato de salida (obligatorio). |
+| `--output RUTA` | Archivo de salida en UTF-8. Si se omite, escribe a stdout. |
+| `--artist-id N` | Solo el artista indicado. |
+| `--top N` | Solo los primeros N según el orden elegido. |
+| `--sort-by CAMPO` | `revenue` (por defecto), `units_sold`, `album_count`, `track_count`, `total_duration_ms`, `avg_track_duration_ms` (de mayor a menor), `name` o `artist_id` (ascendente). Los empates se ordenan por `artist_id`. |
+
+Cada fila tiene `artist_id`, `name`, `album_count`, `track_count`, `total_duration_ms`, `avg_track_duration_ms`, `revenue` (ventas reales, `InvoiceLine.UnitPrice × Quantity`) y `units_sold`. En CSV, `revenue` siempre tiene 2 decimales.
+
+```json
+[
+  {
+    "artist_id": 90,
+    "name": "Iron Maiden",
+    "album_count": 21,
+    "track_count": 213,
+    "total_duration_ms": 71844745,
+    "avg_track_duration_ms": 337299,
+    "revenue": 138.6,
+    "units_sold": 140
+  }
+]
+```
+
+Códigos de salida: `0` si todo salió bien; `1` si no se pudo abrir la base de datos, el artista no existe o no se pudo escribir el archivo; `2` si los argumentos son inválidos.
+
 ## Estructura del proyecto
 
 | Archivo | Contenido |
@@ -76,8 +113,9 @@ curl localhost:5000/db/artists/999999/albums
 | `routes.py` | Endpoints que usan los datos en memoria. |
 | `db_routes.py` | Blueprint `/db` con los endpoints que consultan `chinook.db`. |
 | `analytics.py` | Funciones puras de estadísticas usadas por `/stats/*`. |
+| `reporter.py` | CLI que genera estadísticas por artista desde `chinook.db` en JSON o CSV. |
 | `chinook.db` | Base de datos de ejemplo Chinook (SQLite). |
-| `test_routes.py`, `test_db_routes.py` | Pruebas con pytest. |
+| `test_routes.py`, `test_db_routes.py`, `test_reporter.py`, `test_reporter_unit.py` | Pruebas con pytest. |
 
 ## Desarrollo
 

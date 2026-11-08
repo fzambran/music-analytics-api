@@ -4,7 +4,7 @@ Este archivo orienta a Claude Code (claude.ai/code) cuando trabaja con el códig
 
 ## Estado del proyecto
 
-Creado con `uv init --package` y usado después para alojar la **variante base** del ejercicio Music Analytics API: una API REST mínima en Flask que funciona principalmente con **datos simulados en memoria**, más un endpoint SQLite de solo lectura (un Blueprint bajo `/db`) que consulta `chinook.db`. Los módulos de la API (`app.py`, `config.py`, `models.py`, `routes.py`, `db_routes.py`, `analytics.py`) y las suites de pytest (`test_routes.py`, `test_db_routes.py`) están en la raíz del repositorio como módulos planos de nivel superior, no dentro del paquete.
+Creado con `uv init --package` y usado después para alojar la **variante base** del ejercicio Music Analytics API: una API REST mínima en Flask que funciona principalmente con **datos simulados en memoria**, más un endpoint SQLite de solo lectura (un Blueprint bajo `/db`) que consulta `chinook.db`. Los módulos de la API (`app.py`, `config.py`, `models.py`, `routes.py`, `db_routes.py`, `analytics.py`), el script de reportes `reporter.py` y las suites de pytest (`test_routes.py`, `test_db_routes.py`, `test_reporter.py`, `test_reporter_unit.py`) están en la raíz del repositorio como módulos planos de nivel superior, no dentro del paquete.
 
 El paquete `src/music_analytics_api/` todavía contiene solo el `main()` de ejemplo generado al crear el proyecto. El README está vacío.
 
@@ -36,6 +36,7 @@ uv run flask run                  # ejecutar la API (o: uv run python app.py)
 FLASK_DEBUG=1 uv run python app.py  # el modo debug es opcional (desactivado por defecto)
 uv run pytest                     # ejecutar todas las pruebas
 uv run pytest test_routes.py::test_name  # ejecutar una sola prueba
+uv run python reporter.py --format json --top 5  # reporte de artistas (json o csv)
 ```
 
 `SECRET_KEY` se lee del entorno; si no está definida, se genera una clave aleatoria por proceso.
@@ -50,6 +51,7 @@ Flujo de una petición: `app.py` crea la app Flask, configura las sesiones, regi
 - `routes.py`: todos los handlers de rutas en memoria (`/artists`, `/artists/search`, `/artists/<id>`, `/artists/<id>/albums`, `/albums`, `/stats/albums`, `/stats/average-tracks`).
 - `db_routes.py`: Blueprint `db_bp` (`url_prefix="/db"`) respaldado por `chinook.db`, ubicado en la raíz del repositorio. `GET /db/artists/<id>/albums` devuelve los álbumes del artista ordenados por título (con las claves `album_id`, `title`, `artist_id`, como la API en memoria pero sin `track_count`), o un 404 `{"error": "Artist not found"}` si el artista no está en la tabla `Artist`. Cada petición abre una conexión de solo lectura (`mode=ro`), usa consultas parametrizadas y la cierra al terminar. A diferencia de `routes.py`, no importa `app`: es `app.py` quien lo importa y llama a `app.register_blueprint(db_bp)`. El prefijo `/db` existe para no chocar con la ruta en memoria `/artists/<id>/albums` de `routes.py`. Se prueba en `test_db_routes.py` contra el `chinook.db` real (las tablas de Chinook tienen nombres en singular: `Artist`, `Album`, `Track`, ...).
 - `analytics.py`: funciones puras (`calculate_album_stats`, `calculate_average_tracks`) que usan las rutas `/stats/*`. `calculate_album_stats` filtra por `min_tracks`, aplica un multiplicador de popularidad, clasifica los resultados en los niveles `platinum`/`gold` y devuelve solo los 5 primeros.
+- `reporter.py`: CLI y módulo importable (no es un endpoint Flask) que genera estadísticas por artista desde `chinook.db` (`album_count`, `track_count`, `total_duration_ms`, `avg_track_duration_ms`, `revenue`, `units_sold`) y las exporta a JSON o CSV. Reutiliza `get_db_connection()` de `db_routes.py` (solo lectura). La consulta agrega cada tabla (`Album`, `Track`, `InvoiceLine`) en su propia subconsulta por artista antes de unirlas, para que los JOIN no inflen los conteos; incluye a los artistas sin álbumes o sin ventas con valores en 0. `revenue` son ventas reales (`InvoiceLine.UnitPrice * Quantity`) sumadas en centavos enteros para evitar errores de punto flotante. `get_artist_stats(connection, ...)` no abre ni cierra la conexión; `ORDER BY` se arma desde la lista blanca `SORT_COLUMNS`. Pruebas: `test_reporter.py` (integración contra `chinook.db` y el CLI) y `test_reporter_unit.py` (exportadores y agregación con SQLite en memoria).
 
 Las nuevas rutas respaldadas por SQLite deben ir en el Blueprint `db_routes` (bajo `/db`), no en `routes.py`. Los hooks de petición y el middleware pertenecen a otra variante del ejercicio (`-with-hooks`), que no está en este repositorio.
 
