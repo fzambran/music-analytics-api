@@ -109,7 +109,9 @@ Con `--detail`, cada álbum tiene `album_id`, `title`, `track_count`, `total_dur
 ]
 ```
 
-Códigos de salida: `0` si todo salió bien; `1` si no se pudo abrir la base de datos, el artista no existe o no se pudo escribir el archivo; `2` si los argumentos son inválidos.
+Antes de consultar, el reporte comprueba que la base tenga las tablas y columnas de Chinook que necesita (`Artist`, `Album`, `Track`, `Genre`, `InvoiceLine`). Si faltan, el error indica cuáles, por ejemplo: `error: otra.db no es una base Chinook válida: falta la tabla Artist`.
+
+Códigos de salida: `0` si todo salió bien; `1` si no se pudo abrir la base de datos, la base no tiene el esquema de Chinook, el artista no existe o no se pudo escribir el archivo; `2` si los argumentos son inválidos.
 
 ## Estructura del proyecto
 

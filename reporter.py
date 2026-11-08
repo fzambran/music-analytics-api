@@ -17,7 +17,21 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import TextIO
 
-from db_routes import get_db_connection
+from db_routes import CHINOOK_DB_PATH, get_db_connection
+
+# Tables and columns the report reads. validate_schema checks them up front so a
+# SQLite file that is not a Chinook database gets a clear error.
+REQUIRED_SCHEMA: dict[str, tuple[str, ...]] = {
+    "Artist": ("ArtistId", "Name"),
+    "Album": ("AlbumId", "Title", "ArtistId"),
+    "Track": ("TrackId", "AlbumId", "GenreId", "Milliseconds"),
+    "Genre": ("GenreId", "Name"),
+    "InvoiceLine": ("TrackId", "UnitPrice", "Quantity"),
+}
+
+
+class SchemaError(Exception):
+    """The database opened but lacks tables or columns the report needs."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,6 +159,31 @@ LEFT JOIN (
 WHERE al.ArtistId IN ({{placeholders}})
 ORDER BY al.ArtistId, al.Title, al.AlbumId
 """
+
+
+def validate_schema(connection: sqlite3.Connection) -> None:
+    """Raise SchemaError if any table or column in REQUIRED_SCHEMA is missing.
+
+    The message lists every missing table and column, not just the first one.
+    Table and column names are compared case-insensitively, as SQLite does.
+    sqlite3.DatabaseError propagates if the file is not a SQLite database.
+    """
+    problems = []
+    for table, columns in REQUIRED_SCHEMA.items():
+        existing = {
+            name.casefold()
+            for (name,) in connection.execute(
+                "SELECT name FROM pragma_table_info(?)", (table,)
+            )
+        }
+        if not existing:
+            problems.append(f"falta la tabla {table}")
+            continue
+        missing = [column for column in columns if column.casefold() not in existing]
+        if missing:
+            problems.append(f"faltan columnas en {table}: {', '.join(missing)}")
+    if problems:
+        raise SchemaError("; ".join(problems))
 
 
 def _cents_to_amount(cents: int) -> float:
@@ -305,12 +344,33 @@ def to_csv(stats: Iterable[ArtistStats], file: TextIO, *, detail: bool = False) 
         writer.writerow(row)
 
 
-def _export(stats: list[ArtistStats], file: TextIO, args: argparse.Namespace) -> None:
-    """Write `stats` to `file` in the format requested on the command line."""
-    if args.format == "json":
+def export(
+    stats: Iterable[ArtistStats], file: TextIO, *, fmt: str, detail: bool = False
+) -> None:
+    """Write `stats` to an open text `file` as "json" or "csv".
+
+    `detail` only affects CSV (one row per album); JSON nests albums whenever the
+    stats include them. Raises ValueError for an unknown format.
+    """
+    if fmt == "json":
         to_json(stats, file)
+    elif fmt == "csv":
+        to_csv(stats, file, detail=detail)
     else:
-        to_csv(stats, file, detail=args.detail)
+        raise ValueError(f"Invalid format {fmt!r}; expected 'json' or 'csv'")
+
+
+def write_output(
+    path: Path, stats: Iterable[ArtistStats], *, fmt: str, detail: bool = False
+) -> None:
+    """Write `stats` to the file at `path` (UTF-8), creating missing directories.
+
+    The file is opened with newline="" so CSV rows get no extra blank lines on
+    Windows. OSError propagates (e.g. `path` is a directory or a parent is a file).
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as file:
+        export(stats, file, fmt=fmt, detail=detail)
 
 
 def _positive_int(value: str) -> int:
@@ -356,9 +416,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the reporter CLI and return the process exit code."""
     args = parse_args(argv)
+    db_path = args.db if args.db is not None else CHINOOK_DB_PATH
 
     try:
         with closing(get_db_connection(args.db)) as connection:
+            validate_schema(connection)
             artist_id = args.artist_id
             if args.artist is not None:
                 artist_id = find_artist_id(connection, args.artist)
@@ -372,6 +434,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 sort_by=args.sort_by,
                 include_albums=args.detail,
             )
+    except SchemaError as error:
+        print(
+            f"error: {db_path} no es una base Chinook válida: {error}", file=sys.stderr
+        )
+        return 1
     except sqlite3.Error as error:
         print(f"error: no se pudo abrir la base de datos: {error}", file=sys.stderr)
         return 1
@@ -381,12 +448,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
 
     if args.output is None:
-        _export(stats, sys.stdout, args)
+        export(stats, sys.stdout, fmt=args.format, detail=args.detail)
         return 0
     try:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        with args.output.open("w", encoding="utf-8", newline="") as file:
-            _export(stats, file, args)
+        write_output(args.output, stats, fmt=args.format, detail=args.detail)
     except OSError as error:
         print(f"error: no se pudo escribir {args.output}: {error}", file=sys.stderr)
         return 1

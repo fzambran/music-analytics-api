@@ -8,7 +8,7 @@ import pytest
 
 import reporter
 from db_routes import CHINOOK_DB_PATH, get_db_connection
-from reporter import ArtistStats, find_artist_id, get_artist_stats
+from reporter import ArtistStats, find_artist_id, get_artist_stats, validate_schema
 
 
 @pytest.fixture
@@ -333,7 +333,9 @@ def test_cli_corrupt_database_exits_1(tmp_path, capsys):
     corrupt = tmp_path / "corrupt.db"
     corrupt.write_bytes(b"this is not a sqlite database" * 100)
     assert reporter.main(["--format", "json", "--db", str(corrupt)]) == 1
-    assert "no se pudo abrir la base de datos" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "no se pudo abrir la base de datos" in err
+    assert "no es una base Chinook" not in err
 
 
 def test_cli_creates_missing_output_directories(tmp_path):
@@ -358,3 +360,15 @@ def test_cli_output_parent_is_a_file_exits_1(tmp_path, capsys):
 def vars_of(item: ArtistStats) -> dict:
     """Summary field values of an ArtistStats (slots dataclasses have no __dict__)."""
     return {name: getattr(item, name) for name in reporter.FIELDS}
+
+
+def test_real_chinook_db_passes_schema_validation(connection):
+    validate_schema(connection)
+
+
+def test_cli_empty_sqlite_file_is_not_chinook(tmp_path, capsys):
+    """A zero-byte file is a valid, empty SQLite database for SQLite."""
+    empty = tmp_path / "empty.db"
+    empty.touch()
+    assert reporter.main(["--format", "json", "--db", str(empty)]) == 1
+    assert "no es una base Chinook válida" in capsys.readouterr().err
