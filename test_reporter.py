@@ -2,7 +2,11 @@
 
 import csv
 import json
+import os
+import sqlite3
+import sys
 from contextlib import closing
+from dataclasses import asdict
 
 import pytest
 
@@ -499,3 +503,161 @@ def test_untranslated_argparse_messages_are_kept():
         reporter._translate_argparse_message("argument --x: something new")
         == "argumento --x: something new"
     )
+
+
+# JSON layout and round trip
+
+
+def test_cli_json_uses_two_space_indent_and_final_newline(capsys):
+    assert reporter.main(["--format", "json", "--top", "2", "--detail"]) == 0
+    out = capsys.readouterr().out
+    assert out == json.dumps(json.loads(out), ensure_ascii=False, indent=2) + "\n"
+    lines = out.splitlines()
+    assert lines[0] == "["
+    assert lines[1] == "  {"
+    assert lines[2].startswith('    "artist_id": ')
+
+
+@pytest.mark.parametrize("detail", [False, True])
+def test_cli_json_round_trips_to_the_same_stats(connection, capsys, detail):
+    """The whole JSON output equals the dataclasses it was built from."""
+    stats = get_artist_stats(connection, include_albums=detail)
+    expected = []
+    for item in stats:
+        row = asdict(item)
+        if not detail:
+            del row["albums"]
+        expected.append(row)
+    # Tuples become JSON lists; normalize the expected side the same way.
+    expected = json.loads(json.dumps(expected))
+
+    argv = ["--format", "json", *(["--detail"] if detail else [])]
+    assert reporter.main(argv) == 0
+    assert json.loads(capsys.readouterr().out) == expected
+
+
+# Output file handling
+
+
+def test_cli_overwrites_existing_output_file(tmp_path):
+    output = tmp_path / "artists.json"
+    assert reporter.main(["--format", "json", "--output", str(output)]) == 0
+    assert len(json.loads(output.read_text(encoding="utf-8"))) == 275
+
+    argv = ["--format", "json", "--top", "1", "--output", str(output)]
+    assert reporter.main(argv) == 0
+    data = json.loads(output.read_text(encoding="utf-8"))  # no leftovers from run 1
+    assert [row["artist_id"] for row in data] == [90]
+
+
+@pytest.fixture
+def db_without_chinook_schema(tmp_path):
+    path = tmp_path / "other.db"
+    with closing(sqlite3.connect(path)) as conn:
+        conn.execute("CREATE TABLE Unrelated (x)")
+    return path
+
+
+@pytest.mark.parametrize(
+    "extra_argv",
+    [
+        ["--artist-id", "999999"],
+        ["--artist", "Nobody"],
+        ["--artist-contains", "zzz"],
+        ["--db", "{missing_db}"],
+        ["--db", "{bad_schema_db}"],
+    ],
+)
+def test_cli_error_leaves_no_output_file(
+    tmp_path, db_without_chinook_schema, capsys, extra_argv
+):
+    output = tmp_path / "reports" / "artists.json"
+    replacements = {
+        "{missing_db}": str(tmp_path / "missing.db"),
+        "{bad_schema_db}": str(db_without_chinook_schema),
+    }
+    extra_argv = [replacements.get(arg, arg) for arg in extra_argv]
+
+    argv = ["--format", "json", "--output", str(output), *extra_argv]
+    assert reporter.main(argv) == 1
+    assert capsys.readouterr().err.startswith("error: ")
+    assert not output.exists()
+    assert not output.parent.exists()  # directories are only created on success
+
+
+needs_permissions = pytest.mark.skipif(
+    sys.platform == "win32" or os.geteuid() == 0,
+    reason="POSIX permissions are not enforced on Windows or for root",
+)
+
+
+@needs_permissions
+def test_cli_read_only_output_file_exits_1(tmp_path, capsys):
+    output = tmp_path / "artists.json"
+    output.write_text("previous report", encoding="utf-8")
+    output.chmod(0o444)
+    try:
+        assert reporter.main(["--format", "json", "--output", str(output)]) == 1
+        assert "no se pudo escribir" in capsys.readouterr().err
+        assert output.read_text(encoding="utf-8") == "previous report"
+    finally:
+        output.chmod(0o644)
+
+
+@needs_permissions
+def test_cli_read_only_output_directory_exits_1(tmp_path, capsys):
+    directory = tmp_path / "locked"
+    directory.mkdir()
+    directory.chmod(0o555)
+    try:
+        output = directory / "artists.json"
+        assert reporter.main(["--format", "json", "--output", str(output)]) == 1
+        assert "no se pudo escribir" in capsys.readouterr().err
+        assert not output.exists()
+    finally:
+        directory.chmod(0o755)
+
+
+# Connection lifecycle in main()
+
+
+@pytest.fixture
+def opened_connections(monkeypatch):
+    """Spy on reporter.get_db_connection; the real function still opens the db."""
+    opened = []
+    real = reporter.get_db_connection
+
+    def spy(path=None):
+        connection = real(path)
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(reporter, "get_db_connection", spy)
+    return opened
+
+
+def assert_closed(connection: sqlite3.Connection) -> None:
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        connection.execute("SELECT 1")
+
+
+@pytest.mark.parametrize(
+    ("extra_argv", "exit_code"),
+    [
+        (["--top", "1"], 0),
+        (["--artist-id", "999999"], 1),
+        (["--artist", "Nobody"], 1),
+        (["--artist-contains", "zzz"], 1),
+        (["--db", "{bad_schema_db}"], 1),
+    ],
+)
+def test_cli_closes_the_connection(
+    opened_connections, db_without_chinook_schema, capsys, extra_argv, exit_code
+):
+    extra_argv = [
+        str(db_without_chinook_schema) if arg == "{bad_schema_db}" else arg
+        for arg in extra_argv
+    ]
+    assert reporter.main(["--format", "json", *extra_argv]) == exit_code
+    (connection,) = opened_connections
+    assert_closed(connection)
