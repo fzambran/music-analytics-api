@@ -73,18 +73,25 @@ curl localhost:5000/db/artists/999999/albums
 ```sh
 uv run python reporter.py --format json --top 5                # los 5 con más ingresos, a stdout
 uv run python reporter.py --format csv --output artistas.csv   # todos los artistas a un archivo
-uv run python reporter.py --format json --artist-id 90         # un solo artista
+uv run python reporter.py --format json --artist-id 90         # un solo artista por ID
+uv run python reporter.py --format json --artist "iron maiden" --detail   # por nombre, con detalle por álbum
+uv run python reporter.py --format csv --detail --output reportes/albumes.csv   # una fila por álbum
 ```
 
 | Opción | Descripción |
 |---|---|
 | `--format {json,csv}` | Formato de salida (obligatorio). |
-| `--output RUTA` | Archivo de salida en UTF-8. Si se omite, escribe a stdout. |
-| `--artist-id N` | Solo el artista indicado. |
+| `--output RUTA` | Archivo de salida en UTF-8. Crea los directorios que falten. Si se omite, escribe a stdout. |
+| `--db RUTA` | Base SQLite a leer, siempre en modo de solo lectura. Por defecto, `chinook.db` del repositorio. |
+| `--artist-id N` | Solo el artista con ese ID. |
+| `--artist NOMBRE` | Solo el artista con ese nombre exacto, sin distinguir mayúsculas, también en letras con acento (`"ANTÔNIO CARLOS JOBIM"` encuentra a `Antônio Carlos Jobim`). No se puede combinar con `--artist-id`. |
 | `--top N` | Solo los primeros N según el orden elegido. |
+| `--detail` | Agrega el detalle por álbum: en JSON, una lista `albums` dentro de cada artista; en CSV, una fila por álbum. |
 | `--sort-by CAMPO` | `revenue` (por defecto), `units_sold`, `album_count`, `track_count`, `total_duration_ms`, `avg_track_duration_ms` (de mayor a menor), `name` o `artist_id` (ascendente). Los empates se ordenan por `artist_id`. |
 
-Cada fila tiene `artist_id`, `name`, `album_count`, `track_count`, `total_duration_ms`, `avg_track_duration_ms`, `revenue` (ventas reales, `InvoiceLine.UnitPrice × Quantity`) y `units_sold`. En CSV, `revenue` siempre tiene 2 decimales.
+Cada fila tiene `artist_id`, `name`, `album_count`, `track_count`, `total_duration_ms`, `avg_track_duration_ms`, `revenue` (ventas reales, `InvoiceLine.UnitPrice × Quantity`), `units_sold` y `genres` (géneros de sus pistas, ordenados; en CSV, separados por `; `). En CSV, `revenue` siempre tiene 2 decimales.
+
+Con `--detail`, cada álbum tiene `album_id`, `title`, `track_count`, `total_duration_ms`, `revenue` y `units_sold`, ordenados por título. El CSV con `--detail` tiene las columnas `artist_id`, `artist_name` y las del álbum; los artistas sin álbumes no generan filas.
 
 ```json
 [
@@ -96,7 +103,8 @@ Cada fila tiene `artist_id`, `name`, `album_count`, `track_count`, `total_durati
     "total_duration_ms": 71844745,
     "avg_track_duration_ms": 337299,
     "revenue": 138.6,
-    "units_sold": 140
+    "units_sold": 140,
+    "genres": ["Blues", "Heavy Metal", "Metal", "Rock"]
   }
 ]
 ```
