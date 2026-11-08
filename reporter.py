@@ -8,8 +8,11 @@ Usage:
 
 import argparse
 import csv
+import errno
 import json
+import os
 import re
+import shutil
 import sqlite3
 import sys
 from collections import defaultdict
@@ -100,12 +103,12 @@ _REVENUE_CENTS = "SUM(CAST(ROUND(il.UnitPrice * 100) AS INTEGER) * il.Quantity)"
 _STATS_SQL = f"""
 SELECT
     ar.ArtistId AS artist_id,
-    ar.Name AS name,
+    COALESCE(ar.Name, '') AS name,
     COALESCE(al.album_count, 0) AS album_count,
     COALESCE(t.track_count, 0) AS track_count,
     COALESCE(t.total_ms, 0) AS total_duration_ms,
     CASE WHEN COALESCE(t.track_count, 0) = 0 THEN 0
-         ELSE CAST(ROUND(1.0 * t.total_ms / t.track_count) AS INTEGER)
+         ELSE CAST(ROUND(1.0 * COALESCE(t.total_ms, 0) / t.track_count) AS INTEGER)
     END AS avg_track_duration_ms,
     COALESCE(s.revenue_cents, 0) AS revenue_cents,
     COALESCE(s.units, 0) AS units_sold
@@ -133,7 +136,7 @@ SELECT DISTINCT a.ArtistId, g.Name
 FROM Track tr
 JOIN Album a ON a.AlbumId = tr.AlbumId
 JOIN Genre g ON g.GenreId = tr.GenreId
-WHERE a.ArtistId IN ({placeholders})
+WHERE a.ArtistId IN (SELECT value FROM json_each(?)) AND g.Name IS NOT NULL
 ORDER BY a.ArtistId, g.Name
 """
 
@@ -141,7 +144,7 @@ _ALBUMS_SQL = f"""
 SELECT
     al.ArtistId,
     al.AlbumId,
-    al.Title,
+    COALESCE(al.Title, ''),
     COALESCE(t.track_count, 0),
     COALESCE(t.total_ms, 0),
     COALESCE(s.revenue_cents, 0),
@@ -158,9 +161,15 @@ LEFT JOIN (
     JOIN Track tr ON tr.TrackId = il.TrackId
     GROUP BY tr.AlbumId
 ) s ON s.AlbumId = al.AlbumId
-WHERE al.ArtistId IN ({{placeholders}})
+WHERE al.ArtistId IN (SELECT value FROM json_each(?))
 ORDER BY al.ArtistId, al.Title, al.AlbumId
 """
+
+
+# Artist.Name is nullable in the Chinook schema; nameless artists never match.
+_NAMED_ARTISTS_SQL = (
+    "SELECT ArtistId, Name FROM Artist WHERE Name IS NOT NULL ORDER BY ArtistId"
+)
 
 
 def validate_schema(connection: sqlite3.Connection) -> None:
@@ -203,9 +212,7 @@ def find_artist_id(connection: sqlite3.Connection, name: str) -> int | None:
     wanted = name.strip().casefold()
     if not wanted:
         return None
-    for artist_id, artist_name in connection.execute(
-        "SELECT ArtistId, Name FROM Artist ORDER BY ArtistId"
-    ):
+    for artist_id, artist_name in connection.execute(_NAMED_ARTISTS_SQL):
         if artist_name.casefold() == wanted:
             return artist_id
     return None
@@ -223,9 +230,7 @@ def find_artist_ids_containing(connection: sqlite3.Connection, text: str) -> lis
         return []
     return [
         artist_id
-        for artist_id, artist_name in connection.execute(
-            "SELECT ArtistId, Name FROM Artist ORDER BY ArtistId"
-        )
+        for artist_id, artist_name in connection.execute(_NAMED_ARTISTS_SQL)
         if wanted in artist_name.casefold()
     ]
 
@@ -234,9 +239,8 @@ def _genres_by_artist(
     connection: sqlite3.Connection, artist_ids: list[int]
 ) -> dict[int, tuple[str, ...]]:
     """Map each artist id to the sorted distinct genres of its tracks."""
-    sql = _GENRES_SQL.format(placeholders=", ".join("?" * len(artist_ids)))
     genres: dict[int, list[str]] = defaultdict(list)
-    for artist_id, genre in connection.execute(sql, artist_ids):
+    for artist_id, genre in connection.execute(_GENRES_SQL, (json.dumps(artist_ids),)):
         genres[artist_id].append(genre)
     return {artist_id: tuple(names) for artist_id, names in genres.items()}
 
@@ -245,9 +249,8 @@ def _albums_by_artist(
     connection: sqlite3.Connection, artist_ids: list[int]
 ) -> dict[int, tuple[AlbumStats, ...]]:
     """Map each artist id to its album statistics, ordered by title."""
-    sql = _ALBUMS_SQL.format(placeholders=", ".join("?" * len(artist_ids)))
     albums: dict[int, list[AlbumStats]] = defaultdict(list)
-    for row in connection.execute(sql, artist_ids):
+    for row in connection.execute(_ALBUMS_SQL, (json.dumps(artist_ids),)):
         albums[row[0]].append(
             AlbumStats(
                 album_id=row[1],
@@ -291,7 +294,7 @@ def get_artist_stats(
 
     column, direction = SORT_COLUMNS[sort_by]
     sql = _STATS_SQL
-    params: list[int] = []
+    params: list[int | str] = []
     if artist_id is not None:
         sql += "WHERE ar.ArtistId = ?\n"
         params.append(artist_id)
@@ -299,8 +302,9 @@ def get_artist_stats(
         ids = list(artist_ids)
         if not ids:
             return []
-        sql += f"WHERE ar.ArtistId IN ({', '.join('?' * len(ids))})\n"
-        params.extend(ids)
+        # A single JSON parameter: SQLite limits the number of bound variables.
+        sql += "WHERE ar.ArtistId IN (SELECT value FROM json_each(?))\n"
+        params.append(json.dumps(ids))
     sql += f"ORDER BY {column} {direction}, ar.ArtistId\n"
     if top is not None:
         sql += "LIMIT ?\n"
@@ -310,9 +314,9 @@ def get_artist_stats(
     if not rows:
         return []
 
-    artist_ids = [row[0] for row in rows]
-    genres = _genres_by_artist(connection, artist_ids)
-    albums = _albums_by_artist(connection, artist_ids) if include_albums else None
+    result_ids = [row[0] for row in rows]
+    genres = _genres_by_artist(connection, result_ids)
+    albums = _albums_by_artist(connection, result_ids) if include_albums else None
 
     return [
         ArtistStats(
@@ -352,15 +356,15 @@ def to_csv(stats: Iterable[ArtistStats], file: TextIO, *, detail: bool = False) 
     By default there is one row per artist, with genres joined by "; ". With
     `detail=True` there is one row per album (columns ALBUM_FIELDS); artists
     without albums produce no rows. Detail requires stats built with
-    `include_albums=True`.
+    `include_albums=True`; otherwise ValueError is raised before anything is written.
     """
     if detail:
+        stats = list(stats)
+        _check_export(stats, fmt="csv", detail=True)
         writer = csv.DictWriter(file, fieldnames=ALBUM_FIELDS)
         writer.writeheader()
         for item in stats:
-            if item.albums is None:
-                raise ValueError("detail=True requires stats with albums")
-            for album in item.albums:
+            for album in item.albums or ():
                 row = {"artist_id": item.artist_id, "artist_name": item.name}
                 row.update(asdict(album))
                 row["revenue"] = f"{album.revenue:.2f}"
@@ -376,20 +380,29 @@ def to_csv(stats: Iterable[ArtistStats], file: TextIO, *, detail: bool = False) 
         writer.writerow(row)
 
 
+def _check_export(stats: list[ArtistStats], *, fmt: str, detail: bool) -> None:
+    """Raise ValueError if `stats` cannot be exported as requested."""
+    if fmt not in ("json", "csv"):
+        raise ValueError(f"Invalid format {fmt!r}; expected 'json' or 'csv'")
+    if fmt == "csv" and detail and any(item.albums is None for item in stats):
+        raise ValueError("detail=True requires stats with albums")
+
+
 def export(
     stats: Iterable[ArtistStats], file: TextIO, *, fmt: str, detail: bool = False
 ) -> None:
     """Write `stats` to an open text `file` as "json" or "csv".
 
     `detail` only affects CSV (one row per album); JSON nests albums whenever the
-    stats include them. Raises ValueError for an unknown format.
+    stats include them. Raises ValueError for an unknown format, or for CSV detail
+    without albums, before anything is written.
     """
+    stats = list(stats)
+    _check_export(stats, fmt=fmt, detail=detail)
     if fmt == "json":
         to_json(stats, file)
-    elif fmt == "csv":
-        to_csv(stats, file, detail=detail)
     else:
-        raise ValueError(f"Invalid format {fmt!r}; expected 'json' or 'csv'")
+        to_csv(stats, file, detail=detail)
 
 
 def write_output(
@@ -397,22 +410,50 @@ def write_output(
 ) -> None:
     """Write `stats` to the file at `path` (UTF-8), creating missing directories.
 
+    The arguments are validated before touching the disk, and the content is written
+    to a temporary file in the same directory that then replaces `path`, so an
+    error never leaves an empty or half-written report. An existing file keeps its
+    permissions, a symlink is written through, and a read-only file is not replaced.
     The file is opened with newline="" so CSV rows get no extra blank lines on
-    Windows. OSError propagates (e.g. `path` is a directory or a parent is a file).
+    Windows. ValueError and OSError propagate.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8", newline="") as file:
-        export(stats, file, fmt=fmt, detail=detail)
+    stats = list(stats)
+    _check_export(stats, fmt=fmt, detail=detail)
+
+    target = path.resolve()
+    if target.is_dir():
+        raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR), str(path))
+    if target.exists() and not os.access(target, os.W_OK):
+        raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(path))
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+    try:
+        with temporary.open("x", encoding="utf-8", newline="") as file:
+            export(stats, file, fmt=fmt, detail=detail)
+        if target.exists():
+            shutil.copymode(target, temporary)
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+# Largest integer SQLite can bind; larger values raise OverflowError, not sqlite3.Error.
+_SQLITE_MAX_INTEGER = 2**63 - 1
 
 
 def _positive_int(value: str) -> int:
-    """argparse type for integers >= 1."""
+    """argparse type for integers between 1 and the largest SQLite integer."""
     try:
         number = int(value)
     except ValueError:
         raise argparse.ArgumentTypeError(f"{value!r} no es un número entero") from None
     if number < 1:
         raise argparse.ArgumentTypeError(f"{value!r} debe ser mayor o igual que 1")
+    if number > _SQLITE_MAX_INTEGER:
+        raise argparse.ArgumentTypeError(
+            f"{value!r} debe ser menor o igual que {_SQLITE_MAX_INTEGER}"
+        )
     return number
 
 
@@ -511,59 +552,95 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+class _ArtistNotFound(Exception):
+    """The artist filter given on the command line matched nothing."""
+
+
+def _select_stats(
+    connection: sqlite3.Connection, args: argparse.Namespace
+) -> list[ArtistStats]:
+    """Resolve the artist filter of the CLI and return the requested statistics.
+
+    Raises _ArtistNotFound (with the Spanish message) if the filter matches nothing.
+    """
+    artist_id = args.artist_id
+    artist_ids = None
+    if args.artist is not None:
+        artist_id = find_artist_id(connection, args.artist)
+        if artist_id is None:
+            raise _ArtistNotFound(f"no se encontró el artista {args.artist!r}")
+    elif args.artist_contains is not None:
+        artist_ids = find_artist_ids_containing(connection, args.artist_contains)
+        if not artist_ids:
+            raise _ArtistNotFound(
+                f"ningún artista contiene {args.artist_contains!r} en el nombre"
+            )
+    stats = get_artist_stats(
+        connection,
+        artist_id=artist_id,
+        artist_ids=artist_ids,
+        top=args.top,
+        sort_by=args.sort_by,
+        include_albums=args.detail,
+    )
+    if artist_id is not None and not stats:
+        raise _ArtistNotFound(f"no se encontró el artista con ID {artist_id}")
+    return stats
+
+
+def _write_stdout(stats: list[ArtistStats], args: argparse.Namespace) -> int:
+    """Export to stdout; return 1 quietly if the reader closes the pipe early."""
+    try:
+        export(stats, sys.stdout, fmt=args.format, detail=args.detail)
+        sys.stdout.flush()
+    except BrokenPipeError:
+        # e.g. `reporter.py ... | head`: point stdout at devnull so the interpreter's
+        # final flush does not print a second BrokenPipeError on exit.
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        return 1
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the reporter CLI and return the process exit code."""
     args = parse_args(argv)
     db_path = args.db if args.db is not None else CHINOOK_DB_PATH
 
     try:
-        with closing(get_db_connection(args.db)) as connection:
-            validate_schema(connection)
-            artist_id = args.artist_id
-            artist_ids = None
-            if args.artist is not None:
-                artist_id = find_artist_id(connection, args.artist)
-                if artist_id is None:
-                    print(
-                        f"error: no se encontró el artista {args.artist!r}",
-                        file=sys.stderr,
-                    )
-                    return 1
-            elif args.artist_contains is not None:
-                artist_ids = find_artist_ids_containing(
-                    connection, args.artist_contains
-                )
-                if not artist_ids:
-                    print(
-                        f"error: ningún artista contiene {args.artist_contains!r}"
-                        " en el nombre",
-                        file=sys.stderr,
-                    )
-                    return 1
-            stats = get_artist_stats(
-                connection,
-                artist_id=artist_id,
-                artist_ids=artist_ids,
-                top=args.top,
-                sort_by=args.sort_by,
-                include_albums=args.detail,
-            )
-    except SchemaError as error:
-        print(
-            f"error: {db_path} no es una base Chinook válida: {error}", file=sys.stderr
-        )
-        return 1
+        connection = get_db_connection(args.db)
     except sqlite3.Error as error:
         print(f"error: no se pudo abrir la base de datos: {error}", file=sys.stderr)
         return 1
 
-    if artist_id is not None and not stats:
-        print(f"error: no se encontró el artista con ID {artist_id}", file=sys.stderr)
-        return 1
+    with closing(connection):
+        try:
+            validate_schema(connection)
+        except SchemaError as error:
+            print(
+                f"error: {db_path} no es una base Chinook válida: {error}",
+                file=sys.stderr,
+            )
+            return 1
+        except sqlite3.Error as error:
+            # The first read fails when the file is not a SQLite database.
+            print(f"error: no se pudo abrir la base de datos: {error}", file=sys.stderr)
+            return 1
+
+        try:
+            stats = _select_stats(connection, args)
+        except _ArtistNotFound as error:
+            print(f"error: {error}", file=sys.stderr)
+            return 1
+        except sqlite3.Error as error:
+            print(
+                f"error: no se pudo consultar la base de datos {db_path}: {error}",
+                file=sys.stderr,
+            )
+            return 1
 
     if args.output is None:
-        export(stats, sys.stdout, fmt=args.format, detail=args.detail)
-        return 0
+        return _write_stdout(stats, args)
     try:
         write_output(args.output, stats, fmt=args.format, detail=args.detail)
     except OSError as error:

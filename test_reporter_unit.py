@@ -3,8 +3,13 @@
 import csv
 import io
 import json
+import os
 import sqlite3
+import stat
+import subprocess
+import sys
 from contextlib import closing
+from pathlib import Path
 
 import pytest
 
@@ -418,3 +423,222 @@ def test_cli_partial_schema_names_missing_columns(sample_db_path, capsys):
         )
     assert reporter.main(["--format", "json", "--db", str(sample_db_path)]) == 1
     assert "faltan columnas en InvoiceLine: UnitPrice" in capsys.readouterr().err
+
+
+# Review fixes: integer limits
+
+
+SQLITE_MAX_INTEGER = 2**63 - 1
+
+
+@pytest.mark.parametrize("option", ["--top", "--artist-id"])
+def test_cli_rejects_integers_sqlite_cannot_bind(sample_db_path, capsys, option):
+    argv = ["--format", "json", "--db", str(sample_db_path)]
+    with pytest.raises(SystemExit) as excinfo:
+        reporter.main([*argv, option, str(SQLITE_MAX_INTEGER + 1)])
+    assert excinfo.value.code == 2
+    err = capsys.readouterr().err
+    assert f"debe ser menor o igual que {SQLITE_MAX_INTEGER}" in err
+    assert "Traceback" not in err
+
+
+def test_cli_accepts_the_largest_sqlite_integer(sample_db_path, capsys):
+    argv = ["--format", "json", "--db", str(sample_db_path)]
+    assert reporter.main([*argv, "--top", str(SQLITE_MAX_INTEGER)]) == 0
+    assert len(json.loads(capsys.readouterr().out)) == 3
+    assert reporter.main([*argv, "--artist-id", str(SQLITE_MAX_INTEGER)]) == 1
+    assert "no se encontró el artista con ID" in capsys.readouterr().err
+
+
+# Review fixes: write_output never loses the previous file
+
+
+@pytest.mark.parametrize(
+    ("stats", "kwargs"),
+    [
+        (SAMPLE, {"fmt": "xml"}),
+        (SAMPLE, {"fmt": "csv", "detail": True}),  # stats without albums
+    ],
+)
+def test_write_output_validates_before_touching_the_file(tmp_path, stats, kwargs):
+    path = tmp_path / "report.json"
+    path.write_text("previous report", encoding="utf-8")
+    with pytest.raises(ValueError):
+        write_output(path, stats, **kwargs)
+    assert path.read_text(encoding="utf-8") == "previous report"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["report.json"]
+
+
+def test_write_output_keeps_previous_file_if_export_fails(tmp_path, monkeypatch):
+    path = tmp_path / "report.json"
+    path.write_text("previous report", encoding="utf-8")
+
+    def failing_to_json(stats, file):
+        file.write("[ half a report")
+        raise OSError("disk full")
+
+    monkeypatch.setattr(reporter, "to_json", failing_to_json)
+    with pytest.raises(OSError, match="disk full"):
+        write_output(path, SAMPLE, fmt="json")
+    assert path.read_text(encoding="utf-8") == "previous report"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["report.json"]
+
+
+def test_write_output_keeps_the_permissions_of_an_existing_file(tmp_path):
+    path = tmp_path / "report.json"
+    path.write_text("previous report", encoding="utf-8")
+    path.chmod(0o640)
+    write_output(path, SAMPLE, fmt="json")
+    assert stat.S_IMODE(path.stat().st_mode) == 0o640
+    assert len(json.loads(path.read_text(encoding="utf-8"))) == len(SAMPLE)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges")
+def test_write_output_writes_through_a_symlink(tmp_path):
+    real = tmp_path / "real.json"
+    real.write_text("previous report", encoding="utf-8")
+    link = tmp_path / "link.json"
+    link.symlink_to(real)
+    write_output(link, SAMPLE, fmt="json")
+    assert link.is_symlink()
+    assert len(json.loads(real.read_text(encoding="utf-8"))) == len(SAMPLE)
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32" or os.geteuid() == 0,
+    reason="POSIX permissions are not enforced on Windows or for root",
+)
+def test_write_output_does_not_replace_a_read_only_file(tmp_path):
+    path = tmp_path / "report.json"
+    path.write_text("previous report", encoding="utf-8")
+    path.chmod(0o444)
+    try:
+        with pytest.raises(PermissionError):
+            write_output(path, SAMPLE, fmt="json")
+        assert path.read_text(encoding="utf-8") == "previous report"
+    finally:
+        path.chmod(0o644)
+
+
+@pytest.mark.parametrize(
+    ("writer", "kwargs"),
+    [(to_csv, {"detail": True}), (export, {"fmt": "csv", "detail": True})],
+)
+def test_csv_detail_without_albums_writes_nothing(writer, kwargs):
+    buffer = io.StringIO()
+    with pytest.raises(ValueError, match="albums"):
+        writer(SAMPLE, buffer, **kwargs)
+    assert buffer.getvalue() == ""
+
+
+def test_export_unknown_format_writes_nothing():
+    buffer = io.StringIO()
+    with pytest.raises(ValueError, match="format"):
+        export(SAMPLE, buffer, fmt="xml")
+    assert buffer.getvalue() == ""
+
+
+# Review fixes: closed pipe on stdout
+
+
+def test_cli_closed_pipe_exits_quietly():
+    """`reporter.py ... | head -c 10` must not print a traceback."""
+    repo = Path(__file__).resolve().parent
+    process = subprocess.Popen(
+        [sys.executable, "reporter.py", "--format", "json", "--detail"],
+        cwd=repo,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert process.stdout.read(10) == b"[\n  {\n    "
+    process.stdout.close()  # the reader goes away; the report is larger than the pipe
+    stderr = process.stderr.read().decode()
+    process.stderr.close()
+    assert process.wait(timeout=30) == 1
+    assert "Traceback" not in stderr
+    assert "BrokenPipeError" not in stderr
+
+
+# Review fixes: many artists (SQLite caps bound variables at 32766)
+
+
+@pytest.fixture
+def many_artists_db():
+    with closing(sqlite3.connect(":memory:")) as conn:
+        conn.executescript(SAMPLE_SQL)
+        conn.executemany(
+            "INSERT INTO Artist VALUES (?, ?)",
+            ((i, f"Artist {i}") for i in range(4, 40_001)),
+        )
+        yield conn
+
+
+def test_stats_for_more_artists_than_sqlite_variables(many_artists_db):
+    stats = get_artist_stats(many_artists_db, include_albums=True)
+    assert len(stats) == 40_000
+    assert stats[0].artist_id == 1  # the only artist with sales comes first
+
+
+def test_artist_ids_filter_with_more_ids_than_sqlite_variables(many_artists_db):
+    stats = get_artist_stats(many_artists_db, artist_ids=range(1, 40_001), top=2)
+    assert [item.artist_id for item in stats] == [1, 2]
+
+
+def test_artist_contains_with_many_matches(many_artists_db):
+    ids = reporter.find_artist_ids_containing(many_artists_db, "artist")
+    assert len(get_artist_stats(many_artists_db, artist_ids=ids)) == len(ids) == 39_997
+
+
+# Review fixes: NULL values allowed by the Chinook schema
+
+
+@pytest.fixture
+def nullable_db(memory_db):
+    memory_db.executescript(
+        """
+        INSERT INTO Artist VALUES (4, NULL);
+        INSERT INTO Album VALUES (13, NULL, 4);
+        INSERT INTO Genre VALUES (3, NULL);
+        INSERT INTO Track VALUES (104, 'e', 13, 3, NULL, 0.99);
+        """
+    )
+    return memory_db
+
+
+def test_name_search_skips_artists_without_name(nullable_db):
+    assert find_artist_id(nullable_db, "band") == 1
+    assert reporter.find_artist_ids_containing(nullable_db, "n") == [1, 2, 3]
+
+
+def test_null_values_become_empty_or_zero(nullable_db):
+    (item,) = get_artist_stats(nullable_db, artist_id=4, include_albums=True)
+    assert item.name == ""
+    assert item.genres == ()  # a NULL genre name is skipped
+    assert item.avg_track_duration_ms == 0
+    assert item.total_duration_ms == 0
+    assert item.albums == (AlbumStats(13, "", 1, 0, 0.0, 0),)
+
+
+def test_csv_with_null_values_exports(nullable_db):
+    buffer = io.StringIO()
+    to_csv(get_artist_stats(nullable_db), buffer)
+    _, rows = csv_rows(buffer.getvalue())
+    assert {"artist_id": "4", "name": ""}.items() <= rows[-1].items()
+
+
+# Review fixes: query errors are not reported as "could not open"
+
+
+def test_cli_query_error_is_reported_as_a_query_error(
+    sample_db_path, monkeypatch, capsys
+):
+    def locked(*args, **kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(reporter, "get_artist_stats", locked)
+    assert reporter.main(["--format", "json", "--db", str(sample_db_path)]) == 1
+    err = capsys.readouterr().err
+    assert err == (
+        f"error: no se pudo consultar la base de datos {sample_db_path}: "
+        "database is locked\n"
+    )

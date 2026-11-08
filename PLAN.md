@@ -1,6 +1,6 @@
 # Plan: `reporter.py`, estadísticas por artista desde Chinook (JSON/CSV)
 
-> Plan actualizado al estado de `main` en `e7f5122` (PR #6).
+> Plan actualizado al estado de `main` después del PR #6 y de las correcciones de la revisión de código de `reporter.py`.
 > Reemplaza al plan original aprobado en modo plan, que describía solo la primera versión (PR #5, commit `e58d374`).
 > La sección [Historial de cambios respecto del plan original](#historial-de-cambios-respecto-del-plan-original) resume qué cambió y por qué.
 
@@ -58,7 +58,9 @@ Constantes derivadas:
 
 ### Consultas SQL
 
-Todas usan parámetros `?`; solo `ORDER BY` se arma desde `SORT_COLUMNS` y las listas `IN (?, ...)` se generan con un `?` por ID.
+Todas usan parámetros `?`; solo `ORDER BY` se arma desde `SORT_COLUMNS`.
+Las listas de IDs se pasan como **un único parámetro JSON** (`IN (SELECT value FROM json_each(?))`), porque SQLite limita la cantidad de variables por consulta (32 766) y una base con más artistas pasada con `--db` fallaría.
+Los valores que el esquema de Chinook permite en `NULL` (`Artist.Name`, `Album.Title`, `Track.Milliseconds`, `Genre.Name`) se convierten en `''` o `0`, o se omiten, para que ninguna métrica sea `None`.
 
 1. **Métricas por artista** (`_STATS_SQL`, una sola consulta para todos los artistas).
    `Artist LEFT JOIN` tres subconsultas, cada una agregada por artista antes de unirse, para que ningún JOIN multiplique las filas de otro:
@@ -82,7 +84,7 @@ Según las opciones se ejecutan entre 1 y 4 consultas (la 2 se omite si no hay r
 | `to_json(stats, file)` | Lista de objetos, `ensure_ascii=False`, `indent=2`, salto de línea final. `albums` solo aparece si se pidió el detalle. |
 | `to_csv(stats, file, *, detail=False)` | `csv.DictWriter`. Sin detalle: una fila por artista, `revenue` con 2 decimales y géneros unidos con `; `. Con detalle: una fila por álbum (los artistas sin álbumes no generan filas). |
 | `export(stats, file, *, fmt, detail=False)` | Elige `to_json` o `to_csv` sobre un archivo ya abierto. `ValueError` con un formato desconocido. |
-| `write_output(path, stats, *, fmt, detail=False)` | Crea los directorios que falten y escribe en UTF-8 con `newline=""`. Deja propagar `OSError`. |
+| `write_output(path, stats, *, fmt, detail=False)` | Valida los argumentos **antes** de tocar el disco, crea los directorios que falten y escribe en UTF-8 con `newline=""` en un archivo temporal del mismo directorio que después reemplaza al destino. Un error nunca deja el reporte vacío o a medias. Conserva los permisos de un archivo existente, escribe a través de un enlace simbólico y no reemplaza un archivo de solo lectura. Deja propagar `ValueError` y `OSError`. |
 | `parse_args(argv=None)` / `main(argv=None) -> int` | CLI. `main` devuelve el código de salida en lugar de llamar a `sys.exit()`, para poder probarlo sin lanzar un proceso. |
 
 Conexión: `get_db_connection(path=None)` de `db_routes.py`, siempre en modo de solo lectura (`?mode=ro`), con `row_factory = sqlite3.Row`.
@@ -101,17 +103,19 @@ uv run python reporter.py --format {json,csv} [--output RUTA] [--db RUTA]
 | `--format` | Obligatorio: `json` o `csv`. |
 | `--output RUTA` | Archivo en UTF-8; crea los directorios que falten. Sin esta opción escribe a stdout. |
 | `--db RUTA` | Base SQLite a leer, en solo lectura. Por defecto, `chinook.db` del repositorio. |
-| `--artist-id N` | Un artista por ID (entero ≥ 1). |
+| `--artist-id N` | Un artista por ID (entero entre 1 y 2^63−1, el máximo que acepta SQLite). |
 | `--artist NOMBRE` | Un artista por nombre exacto, sin distinguir mayúsculas. |
 | `--artist-contains TEXTO` | Todos los artistas cuyo nombre contiene el texto (no vacío), sin distinguir mayúsculas. |
-| `--top N` | Los primeros N según el orden (entero ≥ 1), después del filtro de artista. |
+| `--top N` | Los primeros N según el orden (entero entre 1 y 2^63−1), después del filtro de artista. |
 | `--sort-by CAMPO` | Un campo de `SORT_COLUMNS`; por defecto `revenue`. |
 | `--detail` | Detalle por álbum: anidado en JSON, una fila por álbum en CSV. |
 
 `--artist-id`, `--artist` y `--artist-contains` son mutuamente excluyentes.
 Cuando todo sale bien, el CLI no imprime nada además del reporte, para que la salida a stdout se pueda redirigir o encadenar.
+Si quien lee stdout cierra la tubería antes de tiempo (por ejemplo, `| head`), el CLI termina con código 1 sin mostrar un traceback.
 
-Flujo de `main()`: parsear argumentos → abrir la conexión con `closing(...)` → `validate_schema` → resolver el filtro de artista → `get_artist_stats` → escribir con `export` (stdout) o `write_output` (archivo).
+Flujo de `main()`: parsear argumentos → abrir la conexión con `closing(...)` → `validate_schema` → resolver el filtro de artista y consultar (`_select_stats`) → escribir con `export` (stdout) o `write_output` (archivo).
+Los errores al abrir o validar la base y los errores durante las consultas se informan por separado.
 
 ### Manejo de errores
 
@@ -119,13 +123,15 @@ Todos los mensajes del CLI están en español y tienen la forma `error: ...` en 
 
 | Caso | Mensaje | Código |
 |---|---|---|
-| Argumentos inválidos (formato, orden, enteros no positivos, texto vacío, opciones incompatibles, faltantes o desconocidas) | Línea `uso: ...` y, por ejemplo, `error: argumento --top: '0' debe ser mayor o igual que 1` | 2 |
-| Base inexistente, dañada o ilegible (`sqlite3.Error`) | `error: no se pudo abrir la base de datos: ...` | 1 |
+| Argumentos inválidos (formato, orden, enteros fuera de rango, texto vacío, opciones incompatibles, faltantes o desconocidas) | Línea `uso: ...` y, por ejemplo, `error: argumento --top: '0' debe ser mayor o igual que 1` | 2 |
+| Base inexistente, dañada o ilegible (`sqlite3.Error` al abrir o validar) | `error: no se pudo abrir la base de datos: ...` | 1 |
+| Error durante las consultas (`sqlite3.Error`, por ejemplo `database is locked`) | `error: no se pudo consultar la base de datos <ruta>: ...` | 1 |
 | SQLite válido sin el esquema de Chinook (`SchemaError`) | `error: <ruta> no es una base Chinook válida: falta la tabla Artist; faltan columnas en Track: GenreId` | 1 |
 | `--artist-id` inexistente | `error: no se encontró el artista con ID N` | 1 |
 | `--artist` sin coincidencia | `error: no se encontró el artista 'X'` | 1 |
 | `--artist-contains` sin coincidencias | `error: ningún artista contiene 'X' en el nombre` | 1 |
 | `--output` no escribible (`OSError`: es un directorio, el padre es un archivo, permisos) | `error: no se pudo escribir <ruta>: ...` | 1 |
+| stdout cerrado por quien lee (`BrokenPipeError`) | — (sin traceback) | 1 |
 | Éxito | — | 0 |
 
 Los errores de argparse se traducen en `_SpanishArgumentParser.error()` con las plantillas de Python 3.12 (`_ARGPARSE_TRANSLATIONS`).
@@ -134,7 +140,7 @@ No se traducen, a propósito: el texto de `--help`, los `ValueError` de las func
 
 ## Pruebas
 
-112 pruebas del reporte, dentro de las 189 del repositorio.
+132 pruebas del reporte, dentro de las 209 del repositorio.
 
 **`test_reporter.py`** (78, integración contra el `chinook.db` real):
 
@@ -147,12 +153,13 @@ No se traducen, a propósito: el texto de `--help`, los `ValueError` de las func
 - `validate_schema` acepta el `chinook.db` real.
 - CLI: JSON a stdout, CSV a archivo, `--artist`, `--artist-contains`, `--detail` en JSON y CSV, `--db` con base inexistente (sin crear el archivo), dañada o vacía, creación de directorios, salida no escribible, y los 8 errores de uso comparados con el texto exacto en español.
 
-**`test_reporter_unit.py`** (34, sin `chinook.db`):
+**`test_reporter_unit.py`** (54, sin `chinook.db`):
 
 - Exportadores con datos armados a mano e `io.StringIO`: orden de claves, acentos sin escapar, nombres con comas y comillas, listas vacías, detalle anidado y una fila por álbum.
 - Agregación sobre una base SQLite en memoria con datos conocidos: ventas repetidas que no inflan conteos, 0.99 × 3 = 2.97 exacto, géneros, detalle por álbum.
 - `validate_schema`: todas las tablas o columnas que faltan, sin distinguir mayúsculas.
-- `export` y `write_output`: formatos, directorios, UTF-8, fines de línea `\r\n` sin líneas en blanco extra, sobrescritura, errores de ruta.
+- `export` y `write_output`: formatos, directorios, UTF-8, fines de línea `\r\n` sin líneas en blanco extra, sobrescritura, errores de ruta; validación antes de escribir, archivo anterior intacto si la exportación falla, permisos conservados, enlaces simbólicos, archivos de solo lectura.
+- Casos borde de la revisión de código: enteros mayores que 2^63−1, tubería cerrada (con un subproceso real), 40 000 artistas (más que el límite de variables de SQLite), valores `NULL` permitidos por el esquema y errores de consulta.
 - CLI de punta a punta con `--db` sobre una base pequeña en `tmp_path`, sin `monkeypatch`; una prueba confirma que el CLI nunca escribe en la base.
 
 ## Documentación
@@ -174,6 +181,12 @@ No se traducen, a propósito: el texto de `--help`, los `ValueError` de las func
 | #6 | `validate_schema()` y `SchemaError` | Una base sin las tablas de Chinook mostraba un engañoso "no se pudo abrir la base de datos: no such table: Artist". |
 | #6 | `--artist-contains` y `artist_ids=` | Búsqueda parcial además de la exacta. |
 | #6 | Todos los mensajes del CLI en español | Los mensajes mezclaban español e inglés. |
+| Revisión | Límite de 2^63−1 en `--top` y `--artist-id` | Un número mayor terminaba en un traceback `OverflowError`. |
+| Revisión | `write_output` valida antes de escribir y reemplaza el archivo de forma atómica | Un formato inválido vaciaba el archivo anterior. |
+| Revisión | `BrokenPipeError` manejado al escribir a stdout | `\| head` mostraba dos tracebacks. |
+| Revisión | IDs como un parámetro JSON con `json_each(?)` | Más de 32 766 artistas superaban el límite de variables de SQLite. |
+| Revisión | `NULL` en nombres, títulos, duraciones y géneros | Un `Artist.Name` en `NULL` rompía la búsqueda con `AttributeError`. |
+| Revisión | Errores de consulta separados de los de apertura | Un `database is locked` se mostraba como "no se pudo abrir la base de datos". |
 
 Partes del plan original que quedaron obsoletas: la sección "Rama" (`feat/artist-reporter` ya se fusionó y se borró), el riesgo "si el PR #3 se fusiona no cambia `get_db_connection`" y la prueba de base inexistente con `monkeypatch`.
 
@@ -184,18 +197,20 @@ Partes del plan original que quedaron obsoletas: la sección "Rama" (`feat/artis
 - **Acoplamiento a `db_routes`.** `reporter.py` importa `db_routes`, que trae Flask y Pydantic. Si se quisiera usar el reporte sin esas dependencias, habría que mover `get_db_connection` a un módulo propio.
 - **`--sort-by name`** usa `NOCASE`, que solo ignora mayúsculas en letras sin acento; la búsqueda por nombre sí pliega acentos. La diferencia solo afecta el orden de nombres que empiezan con una mayúscula acentuada.
 - **Pistas sin álbum:** hoy no existen en Chinook (`Track.AlbumId` nunca es `NULL`); si aparecieran, no se atribuirían a ningún artista.
+- **stdout en Windows:** `sys.stdout` no usa `newline=""`, así que el CSV por stdout podría tener líneas en blanco extra, y una consola que no use UTF-8 podría fallar con los acentos. No se pudo probar; con `--output` no ocurre.
 - **Fuera de alcance:** filtro por fechas (`--since`/`--until` sobre `Invoice.InvoiceDate`; las facturas van de 2009 a 2013) y géneros por álbum en el detalle.
 
 ## Verificación
 
 ```sh
 uv sync
-uv run pytest                                   # 189 pruebas
+uv run pytest                                   # 209 pruebas
 uv run ruff check . && uv run ruff format --check .
 uv run python reporter.py --format json --top 3              # Iron Maiden, U2, Metallica
 uv run python reporter.py --format csv --artist-contains jobim --detail
 uv run python reporter.py --format json --artist-id 999999; echo "exit=$?"   # 1, mensaje en español
 uv run python reporter.py --format xml; echo "exit=$?"                       # 2, mensaje en español
+uv run python reporter.py --format json | head -c 20                         # sin traceback
 ```
 
 El checksum de `chinook.db` no debe cambiar después de ejecutar el reporte y las pruebas.

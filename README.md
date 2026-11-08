@@ -115,7 +115,10 @@ Antes de consultar, el reporte comprueba que la base tenga las tablas y columnas
 
 Todos los mensajes de error están en español, también los de argumentos inválidos (por ejemplo, `error: argumento --top: '0' debe ser mayor o igual que 1`). Si no hay resultados para el artista pedido, el mensaje es `error: no se encontró el artista 'X'`, `error: no se encontró el artista con ID N` o `error: ningún artista contiene 'X' en el nombre`.
 
-Códigos de salida: `0` si todo salió bien; `1` si no se pudo abrir la base de datos, la base no tiene el esquema de Chinook, el artista no existe o no se pudo escribir el archivo; `2` si los argumentos son inválidos.
+Si falla una consulta después de abrir la base (por ejemplo, porque está bloqueada), el mensaje es `error: no se pudo consultar la base de datos <ruta>: ...`.
+Si se escribe a un archivo, un error nunca deja el reporte anterior vacío o a medias: el archivo se reemplaza solo cuando el nuevo está completo.
+
+Códigos de salida: `0` si todo salió bien; `1` si no se pudo abrir o consultar la base de datos, la base no tiene el esquema de Chinook, el artista no existe o no se pudo escribir el archivo; `2` si los argumentos son inválidos.
 
 ## Estructura del proyecto
 
