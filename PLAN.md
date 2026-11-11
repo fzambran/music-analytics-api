@@ -1,6 +1,6 @@
 # Plan: `reporter.py`, estadísticas por artista desde Chinook (JSON/CSV)
 
-> Plan actualizado al estado de `main` después del PR #6 y de las correcciones de la revisión de código de `reporter.py`.
+> Plan actualizado al estado de `main` en `90e3385` (PR #8).
 > Reemplaza al plan original aprobado en modo plan, que describía solo la primera versión (PR #5, commit `e58d374`).
 > La sección [Historial de cambios respecto del plan original](#historial-de-cambios-respecto-del-plan-original) resume qué cambió y por qué.
 
@@ -141,9 +141,9 @@ No se traducen, a propósito: el texto de `--help`, los `ValueError` de las func
 
 ## Pruebas
 
-159 pruebas del reporte, dentro de las 236 del repositorio.
+175 pruebas del reporte, dentro de las 252 del repositorio.
 
-**`test_reporter.py`** (92, integración contra el `chinook.db` real):
+**`test_reporter.py`** (108, integración contra el `chinook.db` real):
 
 - Una fila por artista (275); ninguna métrica `None`; valores exactos de AC/DC, Iron Maiden y del artista 25.
 - Totales iguales a los de las tablas originales (álbumes, pistas, duración, unidades, ingresos 2328.60): detectan conteos inflados.
@@ -153,6 +153,9 @@ No se traducen, a propósito: el texto de `--help`, los `ValueError` de las func
 - Búsqueda exacta y parcial: mayúsculas, acentos (`"ANTÔNIO CARLOS JOBIM"`, `"NAÇÃO"`), espacios, sin coincidencias; la parcial normalizada (`acdc`, `guns n roses`, `antonio carlos`, `nacao`) y la exacta sin normalizar.
 - `validate_schema` acepta el `chinook.db` real.
 - CLI: JSON a stdout, CSV a archivo, `--artist`, `--artist-contains`, `--detail` en JSON y CSV, `--db` con base inexistente (sin crear el archivo), dañada o vacía, creación de directorios, salida no escribible, y los 8 errores de uso comparados con el texto exacto en español.
+- JSON: sangría de 2 espacios y salto de línea final exactos; la salida completa (con y sin `--detail`) es igual a los datos originales (ida y vuelta).
+- Archivo de salida desde el CLI: una segunda ejecución lo sobrescribe sin dejar restos; ante cualquier error (artista inexistente por ID, nombre o texto; base ausente o sin esquema) no se crean ni el archivo ni sus directorios; un archivo o directorio de solo lectura da código 1 y deja intacto el archivo anterior (se omite en Windows y con root).
+- `main()` cierra la conexión en el caso de éxito y en cada camino de error, verificado con un espía sobre el `get_db_connection` real.
 
 **`test_reporter_unit.py`** (67, sin `chinook.db`):
 
@@ -182,13 +185,14 @@ No se traducen, a propósito: el texto de `--help`, los `ValueError` de las func
 | #6 | `validate_schema()` y `SchemaError` | Una base sin las tablas de Chinook mostraba un engañoso "no se pudo abrir la base de datos: no such table: Artist". |
 | #6 | `--artist-contains` y `artist_ids=` | Búsqueda parcial además de la exacta. |
 | #6 | Todos los mensajes del CLI en español | Los mensajes mezclaban español e inglés. |
-| Revisión | Límite de 2^63−1 en `--top` y `--artist-id` | Un número mayor terminaba en un traceback `OverflowError`. |
-| Revisión | `write_output` valida antes de escribir y reemplaza el archivo de forma atómica | Un formato inválido vaciaba el archivo anterior. |
-| Revisión | `BrokenPipeError` manejado al escribir a stdout | `\| head` mostraba dos tracebacks. |
-| Revisión | IDs como un parámetro JSON con `json_each(?)` | Más de 32 766 artistas superaban el límite de variables de SQLite. |
-| Revisión | `NULL` en nombres, títulos, duraciones y géneros | Un `Artist.Name` en `NULL` rompía la búsqueda con `AttributeError`. |
-| Normalización | `--artist-contains` ignora acentos, espacios y puntuación (`normalize_for_search`); `--artist` no cambia | "acdc" no encontraba a "AC/DC". Solo en la búsqueda parcial, para que la exacta no genere empates entre nombres que difieren en puntuación. |
-| Revisión | Errores de consulta separados de los de apertura | Un `database is locked` se mostraba como "no se pudo abrir la base de datos". |
+| #9 | Límite de 2^63−1 en `--top` y `--artist-id` | Un número mayor terminaba en un traceback `OverflowError`. |
+| #9 | `write_output` valida antes de escribir y reemplaza el archivo de forma atómica | Un formato inválido vaciaba el archivo anterior. |
+| #9 | `BrokenPipeError` manejado al escribir a stdout | `\| head` mostraba dos tracebacks. |
+| #9 | IDs como un parámetro JSON con `json_each(?)` | Más de 32 766 artistas superaban el límite de variables de SQLite. |
+| #9 | `NULL` en nombres, títulos, duraciones y géneros | Un `Artist.Name` en `NULL` rompía la búsqueda con `AttributeError`. |
+| #9 | Errores de consulta separados de los de apertura | Un `database is locked` se mostraba como "no se pudo abrir la base de datos". |
+| #10 | `--artist-contains` ignora acentos, espacios y puntuación (`normalize_for_search`); `--artist` no cambia | "acdc" no encontraba a "AC/DC". Solo en la búsqueda parcial, para que la exacta no genere empates entre nombres que difieren en puntuación. |
+| #8 | Pruebas de sangría y de ida y vuelta del JSON, sobrescritura, archivo de salida tras un error, permisos y cierre de la conexión | Huecos encontrados al revisar la cobertura de `test_reporter.py`. Solo agrega pruebas. |
 
 Partes del plan original que quedaron obsoletas: la sección "Rama" (`feat/artist-reporter` ya se fusionó y se borró), el riesgo "si el PR #3 se fusiona no cambia `get_db_connection`" y la prueba de base inexistente con `monkeypatch`.
 
@@ -207,7 +211,7 @@ Partes del plan original que quedaron obsoletas: la sección "Rama" (`feat/artis
 
 ```sh
 uv sync
-uv run pytest                                   # 236 pruebas
+uv run pytest                                   # 252 pruebas
 uv run ruff check . && uv run ruff format --check .
 uv run python reporter.py --format json --top 3              # Iron Maiden, U2, Metallica
 uv run python reporter.py --format csv --artist-contains jobim --detail
