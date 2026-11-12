@@ -12,3 +12,7 @@ flask_session/
 
 # macOS
 .DS_Store
+
+# Quarto previews of README.md (quarto render/preview writes them next to the source)
+README.html
+README_files/
