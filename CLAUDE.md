@@ -15,7 +15,11 @@ El paquete `src/music_analytics_api/` todavía contiene solo el `main()` de ejem
 - Ruff es el linter y formateador (reglas por defecto; la única configuración es `[tool.ruff.lint.isort] known-third-party = ["flask_session"]`, necesaria porque, de lo contrario, el directorio de sesiones `flask_session/` haría que ruff ordene ese paquete como first-party).
 - Estructura `src/`: el paquete `music_analytics_api` está en `src/music_analytics_api/`. El script de consola `music-analytics-api` apunta a `music_analytics_api:main` (`[project.scripts]` en `pyproject.toml`).
 - `.claude/agents/code-reviewer.md` es un subagente de revisión de solo lectura (nomenclatura, manejo de errores, rendimiento) que ejecuta ruff como parte de su revisión.
-- `.claude/skills/unit-tests` es una skill para escribir y ejecutar pruebas con pytest.
+- Skills del proyecto en `.claude/skills/`:
+  - `unit-tests`: escribe y ejecuta pruebas con pytest.
+  - `refactor`: refactoriza sin cambiar el comportamiento, con las pruebas en verde antes y después de cada paso (usa `unit-tests`).
+  - `commit-message-writer`: escribe mensajes de commit en Conventional Commits, en inglés y con los tipos y scopes del proyecto (`api`, `db`, `reporter`, `deps`, `claude`), y hace el commit si se le pide. Nunca hace commit en `main`; después del commit sigue con `pull-request`.
+  - `pull-request`: sube la rama, abre el PR con `gh`, espera el CI y, solo si se le pide, lo fusiona con squash y actualiza `main`.
 
 ## Comandos
 
