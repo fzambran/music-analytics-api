@@ -1,6 +1,6 @@
 ---
 name: commit-message-writer
-description: Escribe mensajes de commit en formato Conventional Commits, en inglés y con los tipos y scopes de este proyecto, a partir de los cambios preparados en Git y, si el usuario lo pide, hace el commit, sube la rama y abre el PR. Úsala cuando el usuario quiera escribir un mensaje de commit con el formato adecuado. Se activa con "hace commit", "commitear", "confirma mis cambios", "escribe un mensaje de commit", resumir el staged diff, o cuando el usuario pregunte "¿qué pongo en el commit?" o necesite el título de un PR.
+description: Escribe mensajes de commit en formato Conventional Commits, en inglés y con los tipos y scopes de este proyecto, a partir de los cambios preparados en Git y, si el usuario lo pide, hace el commit. Úsala cuando el usuario quiera escribir un mensaje de commit con el formato adecuado. Se activa con "hace commit", "commitear", "confirma mis cambios", "escribe un mensaje de commit", resumir el staged diff, o cuando el usuario pregunte "¿qué pongo en el commit?". Para subir la rama, abrir o fusionar el PR, usa la skill `pull-request`.
 ---
 
 # Mensajes de commit (Conventional Commits)
@@ -108,14 +108,9 @@ Si el usuario pidió **hacer el commit**:
    ...
    EOF
    ```
-4. Sube la rama sin preguntar: `git push -u origin <rama>`.
-   - Nunca subas `main` ni uses `--force`. Si la rama es `main`, algo falló en el paso 1: detente y avisa.
-   - Si el push falla (rechazo, sin red, sin permisos), avisa y deja el commit local; no reintentes con `--force`.
-5. Si la rama no tiene PR (`gh pr view --json url` falla), ábrelo con `gh pr create --base main`: el título es la primera línea del commit y el cuerpo, el body del commit más la línea de atribución. Si ya existe, muestra su URL.
-6. No hagas `--amend`, `--no-verify` ni fusiones el PR salvo que te lo pidan.
+4. No hagas `--amend` ni `--no-verify` salvo que te lo pidan.
+5. Después del commit, continúa sin preguntar con la skill `pull-request` para subir la rama y abrir el PR.
 
-Si el usuario solo pidió el mensaje, no hagas commit, push ni PR.
-
-El **título de un PR** sigue el mismo formato: al fusionar con squash, GitHub lo usa como primera línea del commit en `main`.
+Si el usuario solo pidió el mensaje, no hagas el commit.
 
 Ejemplos tomados del historial del proyecto: [references/examples.md](references/examples.md).
