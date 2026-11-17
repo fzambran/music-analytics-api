@@ -1,6 +1,6 @@
 ---
 name: pull-request
-description: Sube la rama actual a GitHub, abre el pull request con gh, espera el CI y, si el usuario lo pide, lo fusiona con squash y actualiza main. Úsala cuando el usuario diga "sube la rama", "haz push", "abre el PR", "¿pasó el CI?", "fusiona el PR", "mergea", "actualiza main", o necesite el título de un PR. También la usa commit-message-writer después de hacer un commit. No escribe mensajes de commit: para eso está commit-message-writer.
+description: Sube la rama actual a GitHub, abre el pull request con gh y espera el CI. Úsala cuando el usuario diga "sube la rama", "haz push", "abre el PR", "¿pasó el CI?" o necesite el título de un PR. También la usa commit-message-writer después de hacer un commit. No escribe mensajes de commit (commit-message-writer) ni fusiona PR (merge-pr).
 ---
 
 # Pull requests con gh
@@ -41,26 +41,8 @@ EOF
 gh pr checks <N> --watch --interval 10
 ```
 
-El CI ("Lint and test") ejecuta `uv sync --locked`, `ruff check`, `ruff format --check` y `pytest`. Si falla, muestra qué paso falló y no fusiones.
+El CI ("Lint and test") ejecuta `uv sync --locked`, `ruff check`, `ruff format --check` y `pytest`. Si falla, muestra qué paso falló.
 
-## 4. Fusionar (solo si el usuario lo pide)
+## 4. Entrega
 
-1. Revisa `git status --short`. Si hay cambios sin commit en archivos del PR, pregunta si se incluyen antes de fusionar: quedarían fuera.
-2. Confirma que el CI pasó (paso 3).
-3. Fusiona con squash, con la primera línea y el cuerpo escritos por ti; con varios commits, GitHub armaría una lista de `* ` con todos los mensajes:
-   ```sh
-   gh pr merge <N> --squash --delete-branch --subject "<título> (#N)" --body-file - <<'EOF'
-   <body del commit final, líneas de 72 columnas como máximo>
-
-   Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
-   EOF
-   ```
-   El trailer va solo si Claude escribió los commits.
-4. Actualiza la copia local y limpia las ramas borradas:
-   ```sh
-   git switch main && git pull --ff-only && git fetch --prune
-   git status -sb && git log --oneline -3
-   ```
-   `main` debe quedar igual a `origin/main`, sin cambios pendientes y sin la rama fusionada.
-
-No fusiones sin que te lo pidan, ni con el CI en rojo o pendiente.
+Muestra la URL del PR y el resultado del CI, y termina ahí. Fusionar es otra tarea: solo se hace cuando el usuario lo pide, con la skill `merge-pr`.

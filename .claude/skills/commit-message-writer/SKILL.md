@@ -1,6 +1,6 @@
 ---
 name: commit-message-writer
-description: Escribe mensajes de commit en formato Conventional Commits, en inglés y con los tipos y scopes de este proyecto, a partir de los cambios preparados en Git y, si el usuario lo pide, hace el commit. Úsala cuando el usuario quiera escribir un mensaje de commit con el formato adecuado. Se activa con "hace commit", "commitear", "confirma mis cambios", "escribe un mensaje de commit", resumir el staged diff, o cuando el usuario pregunte "¿qué pongo en el commit?". Para subir la rama, abrir o fusionar el PR, usa la skill `pull-request`.
+description: Escribe mensajes de commit en formato Conventional Commits, en inglés y con los tipos y scopes de este proyecto, a partir de los cambios preparados en Git y, si el usuario lo pide, hace el commit. Úsala cuando el usuario quiera escribir un mensaje de commit con el formato adecuado. Se activa con "hace commit", "commitear", "confirma mis cambios", "escribe un mensaje de commit", resumir el staged diff, o cuando el usuario pregunte "¿qué pongo en el commit?". Para subir la rama y abrir el PR, usa la skill `pull-request`; para fusionarlo, `merge-pr`.
 ---
 
 # Mensajes de commit (Conventional Commits)

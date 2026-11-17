@@ -19,7 +19,8 @@ El paquete `src/music_analytics_api/` todavía contiene solo el `main()` de ejem
   - `unit-tests`: escribe y ejecuta pruebas con pytest.
   - `refactor`: refactoriza sin cambiar el comportamiento, con las pruebas en verde antes y después de cada paso (usa `unit-tests`).
   - `commit-message-writer`: escribe mensajes de commit en Conventional Commits, en inglés y con los tipos y scopes del proyecto (`api`, `db`, `reporter`, `deps`, `claude`), y hace el commit si se le pide. Nunca hace commit en `main`; después del commit sigue con `pull-request`.
-  - `pull-request`: sube la rama, abre el PR con `gh`, espera el CI y, solo si se le pide, lo fusiona con squash y actualiza `main`.
+  - `pull-request`: sube la rama, abre el PR con `gh` y espera el CI. No fusiona.
+  - `merge-pr`: solo cuando se le pide, fusiona el PR con squash (con el CI en verde y sin conflictos) y actualiza `main`.
 
 ## Comandos
 
