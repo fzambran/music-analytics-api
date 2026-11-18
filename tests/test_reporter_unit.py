@@ -681,3 +681,34 @@ def test_artist_contains_uses_normalization_on_both_sides(memory_db):
     assert reporter.find_artist_ids_containing(memory_db, "acdc") == [6]
     assert reporter.find_artist_ids_containing(memory_db, "c/d") == [6]
     assert reporter.find_artist_ids_containing(memory_db, "!!!") == []
+
+
+@pytest.fixture
+def fake_home(tmp_path, monkeypatch):
+    """HOME points to tmp_path/home and the working directory is tmp_path/work."""
+    home, work = tmp_path / "home", tmp_path / "work"
+    home.mkdir()
+    work.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(work)
+    return home, work
+
+
+def test_write_output_expands_the_home_directory(fake_home):
+    """`~/...` lands in the home folder; no literal `~` folder is created."""
+    home, work = fake_home
+
+    write_output(Path("~/reports/artists.json"), SAMPLE, fmt="json")
+
+    assert json.loads((home / "reports" / "artists.json").read_text("utf-8"))[0]["name"]
+    assert not (work / "~").exists()
+
+
+def test_cli_output_with_tilde_writes_to_the_home_directory(fake_home, sample_db_path):
+    home, work = fake_home
+
+    argv = ["--format", "csv", "--db", str(sample_db_path), "--output", "~/r.csv"]
+
+    assert reporter.main(argv) == 0
+    assert (home / "r.csv").read_text("utf-8").startswith("artist_id,name,")
+    assert not (work / "~").exists()

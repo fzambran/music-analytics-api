@@ -97,7 +97,7 @@ uv run python -m music_analytics_api.reporter --format csv --detail --output rep
 | Opción | Descripción |
 |---|---|
 | `--format {json,csv}` | Formato de salida (obligatorio). |
-| `--output RUTA` | Archivo de salida en UTF-8. Crea los directorios que falten. Si se omite, escribe a stdout. |
+| `--output RUTA` | Archivo de salida en UTF-8. Crea los directorios que falten. Acepta `~`. Si se omite, escribe a stdout. |
 | `--db RUTA` | Base SQLite a leer, siempre en modo de solo lectura. Acepta `~`. Por defecto, `CHINOOK_DB_PATH` o, si no está definida, `data/chinook.db` del repositorio. |
 | `--artist-id N` | Solo el artista con ese ID. |
 | `--artist NOMBRE` | Solo el artista con ese nombre exacto, con sus espacios y signos de puntuación (`acdc` no encuentra a `AC/DC`, `ac/dc` sí), sin distinguir mayúsculas, también en letras con acento (`"ANTÔNIO CARLOS JOBIM"` encuentra a `Antônio Carlos Jobim`). No se puede combinar con `--artist-id` ni con `--artist-contains`. |
