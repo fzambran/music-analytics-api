@@ -6,12 +6,13 @@ from contextlib import closing
 import pytest
 from pydantic import ValidationError
 
-from music_analytics_api.app import app
+from music_analytics_api.app import create_app
 from music_analytics_api.db_routes import CHINOOK_DB_PATH, AlbumOut, get_db_connection
 
 
 @pytest.fixture
 def client():
+    app = create_app()
     app.config["TESTING"] = True
     with app.test_client() as test_client:
         yield test_client

@@ -22,6 +22,7 @@ uv sync
 ```sh
 uv run flask --app music_analytics_api.app run           # inicia la API en http://localhost:5000
 uv run flask --app music_analytics_api.app --debug run   # inicia la API en modo debug
+uv run python -m music_analytics_api.app                 # alternativa sin la CLI de flask (FLASK_DEBUG=1 para debug)
 ```
 
 En macOS, el puerto 5000 suele estar ocupado por AirPlay; usa otro con `run --port 5001`.
@@ -134,10 +135,10 @@ music-analytics-api/
 
 | Módulo (`src/music_analytics_api/`) | Contenido |
 |---|---|
-| `app.py` | Crea la app Flask, configura las sesiones y registra las rutas. |
+| `app.py` | `create_app()`: crea la app Flask, configura las sesiones y registra los Blueprints de rutas. |
 | `config.py` | Configuración de Flask-Session (sesiones guardadas en `flask_session/`). |
 | `models.py` | Clases `Artist` y `Album` y el almacén en memoria con los datos de ejemplo. |
-| `routes.py` | Endpoints que usan los datos en memoria. |
+| `routes.py` | Blueprint con los endpoints que usan los datos en memoria. |
 | `db_routes.py` | Blueprint `/db` con los endpoints que consultan `data/chinook.db` y el modelo Pydantic `AlbumOut` que valida sus respuestas. |
 | `analytics.py` | Funciones puras de estadísticas usadas por `/stats/*`. |
 | `reporter.py` | CLI que genera estadísticas por artista desde `data/chinook.db` en JSON o CSV. |

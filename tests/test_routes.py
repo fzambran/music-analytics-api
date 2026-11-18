@@ -4,12 +4,13 @@ import pytest
 
 from music_analytics_api import routes
 from music_analytics_api.analytics import calculate_average_tracks
-from music_analytics_api.app import app
+from music_analytics_api.app import create_app
 from music_analytics_api.models import Album, Artist, MusicStore
 
 
 @pytest.fixture
 def client():
+    app = create_app()
     app.config["TESTING"] = True
     with app.test_client() as test_client:
         yield test_client
