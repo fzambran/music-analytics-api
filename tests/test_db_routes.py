@@ -6,8 +6,8 @@ from contextlib import closing
 import pytest
 from pydantic import ValidationError
 
-from app import app
-from db_routes import CHINOOK_DB_PATH, AlbumOut, get_db_connection
+from music_analytics_api.app import app
+from music_analytics_api.db_routes import CHINOOK_DB_PATH, AlbumOut, get_db_connection
 
 
 @pytest.fixture

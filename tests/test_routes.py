@@ -2,10 +2,10 @@
 
 import pytest
 
-import routes
-from analytics import calculate_average_tracks
-from app import app
-from models import Album, Artist, MusicStore
+from music_analytics_api import routes
+from music_analytics_api.analytics import calculate_average_tracks
+from music_analytics_api.app import app
+from music_analytics_api.models import Album, Artist, MusicStore
 
 
 @pytest.fixture

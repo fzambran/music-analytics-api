@@ -4,8 +4,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import db_routes
-from app import app
+from music_analytics_api import db_routes
+from music_analytics_api.app import app
 
 
 def make_fake_connection(artist_row, album_rows):

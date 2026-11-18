@@ -23,7 +23,7 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import NoReturn, TextIO
 
-from db_routes import CHINOOK_DB_PATH, get_db_connection
+from music_analytics_api.db_routes import CHINOOK_DB_PATH, get_db_connection
 
 # Tables and columns the report reads. validate_schema checks them up front so a
 # SQLite file that is not a Chinook database gets a clear error.
