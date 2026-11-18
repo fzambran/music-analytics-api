@@ -137,3 +137,22 @@ def test_running_module_as_main_uses_the_package_instance_folder(monkeypatch):
     runpy.run_module("music_analytics_api.app", run_name="__main__")
 
     assert served[0].instance_path == create_app().instance_path
+
+
+@pytest.mark.parametrize("debug_env, expected", [("1", True), (None, False)])
+def test_console_script_main_runs_the_full_api(monkeypatch, debug_env, expected):
+    """`music-analytics-api` serves every route and reads FLASK_DEBUG."""
+    from music_analytics_api import main
+
+    served = []
+    monkeypatch.setattr(
+        Flask, "run", lambda self, **kwargs: served.append((_rules(self), kwargs))
+    )
+    if debug_env is None:
+        monkeypatch.delenv("FLASK_DEBUG", raising=False)
+    else:
+        monkeypatch.setenv("FLASK_DEBUG", debug_env)
+
+    main()
+
+    assert served == [(IN_MEMORY_RULES | DB_RULES, {"debug": expected})]
