@@ -156,3 +156,42 @@ def test_console_script_main_runs_the_full_api(monkeypatch, debug_env, expected)
     main()
 
     assert served == [(IN_MEMORY_RULES | DB_RULES, {"debug": expected})]
+
+
+@pytest.mark.parametrize("relative", ["other.db", "nested/../other.db"])
+def test_chinook_db_path_resolves_a_relative_variable(tmp_path, relative):
+    """A relative CHINOOK_DB_PATH is resolved against the working directory."""
+    code = "from music_analytics_api.db_routes import CHINOOK_DB_PATH; print(CHINOOK_DB_PATH)"
+
+    output = _run_python(
+        code, cwd=tmp_path, env_overrides={"CHINOOK_DB_PATH": relative}
+    )
+
+    assert output.strip() == str(tmp_path.resolve() / "other.db")
+
+
+def test_db_route_works_with_a_relative_chinook_db_path(tmp_path):
+    """GET /db/artists/1/albums answers 200, not 500, with a relative path."""
+    db_path = Path(__file__).resolve().parents[1] / "data" / "chinook.db"
+    relative = os.path.relpath(db_path, tmp_path)
+    code = (
+        "from music_analytics_api.app import create_app\n"
+        "response = create_app().test_client().get('/db/artists/1/albums')\n"
+        "print(response.status_code, len(response.get_json()))"
+    )
+
+    output = _run_python(
+        code, cwd=tmp_path, env_overrides={"CHINOOK_DB_PATH": relative}
+    )
+
+    assert output.split() == ["200", "2"]
+
+
+def test_chinook_db_path_expands_the_home_directory(tmp_path):
+    """`~` in CHINOOK_DB_PATH expands to the user's home directory."""
+    code = "from music_analytics_api.db_routes import CHINOOK_DB_PATH; print(CHINOOK_DB_PATH)"
+    env = {"CHINOOK_DB_PATH": "~/other.db", "HOME": str(tmp_path)}
+
+    output = _run_python(code, cwd=tmp_path, env_overrides=env)
+
+    assert output.strip() == str(tmp_path.resolve() / "other.db")

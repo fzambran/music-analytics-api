@@ -33,7 +33,7 @@ Variables de entorno:
 | Variable | Uso |
 |---|---|
 | `SECRET_KEY` | Clave de sesión. Si no está definida, se genera una clave aleatoria cada vez que arranca el proceso. |
-| `CHINOOK_DB_PATH` | Ruta de la base Chinook que usan los endpoints `/db` y el reporte. Por defecto, `data/chinook.db` del repositorio. Es obligatoria si instalas el paquete como wheel, porque la base no viene incluida. |
+| `CHINOOK_DB_PATH` | Ruta de la base Chinook que usan los endpoints `/db` y el reporte. Por defecto, `data/chinook.db` del repositorio. Acepta rutas relativas al directorio actual y `~`. Es obligatoria si instalas el paquete como wheel, porque la base no viene incluida. |
 
 Las sesiones se guardan en la carpeta de instancia de Flask (`src/instance/flask_session/` al trabajar desde el repositorio), no en el directorio desde donde se inicia la API.
 
@@ -144,7 +144,7 @@ music-analytics-api/
 | Módulo (`src/music_analytics_api/`) | Contenido |
 |---|---|
 | `app.py` | `create_app()`: crea la app Flask, configura las sesiones y registra los Blueprints de rutas. |
-| `config.py` | Configuración de Flask-Session (sesiones guardadas en `flask_session/`). |
+| `config.py` | Configuración de Flask (`SECRET_KEY` y el tipo de sesión). `create_app()` crea el almacén de sesiones en la carpeta de instancia. |
 | `models.py` | Clases `Artist` y `Album` y el almacén en memoria con los datos de ejemplo. |
 | `routes.py` | Blueprint con los endpoints que usan los datos en memoria. |
 | `db_routes.py` | Blueprint `/db` con los endpoints que consultan `data/chinook.db` y el modelo Pydantic `AlbumOut` que valida sus respuestas. |
