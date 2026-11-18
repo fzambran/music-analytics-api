@@ -97,10 +97,6 @@ class MusicStore:
         """Return every album, in insertion order."""
         return list(self._albums.values())
 
-    def get_albums_by_artist(self, artist_id: int) -> list[Album]:
-        """Return the albums of artist_id; empty if it has none or does not exist."""
-        return [a for a in self._albums.values() if a.artist_id == artist_id]
-
     def search_artists(self, query: str) -> list[Artist]:
         """Return artists whose name contains query (case-insensitive)."""
         query = query.lower()
