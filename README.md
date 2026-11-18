@@ -39,7 +39,7 @@ Las sesiones se guardan en la carpeta de instancia de Flask (`src/instance/flask
 
 ## Endpoints
 
-Todos los endpoints aceptan solo `GET`. Las respuestas y los errores de la API (400 y 404, con la forma `{"error": "..."}`) son JSON. Los errores que genera Flask por su cuenta son páginas HTML: un 404 por una ruta que no existe, un 405 por otro método y un 500 si falla la base de datos.
+Todos los endpoints aceptan solo `GET`. Las respuestas y los errores de la API (400, 404 y los 500 de `/db`, con la forma `{"error": "..."}`) son JSON. Los errores que genera Flask por su cuenta siguen siendo páginas HTML: un 404 por una ruta que no existe y un 405 por otro método.
 
 ### Datos en memoria
 
@@ -61,7 +61,7 @@ Están agrupados en un Blueprint con el prefijo `/db` y leen `data/chinook.db` e
 
 | Endpoint | Descripción |
 |---|---|
-| `/db/artists/<artist_id>/albums` | Devuelve los álbumes del artista ordenados por título (`album_id`, `title`, `artist_id`). Responde 404 si el artista no existe y `[]` si existe pero no tiene álbumes. |
+| `/db/artists/<artist_id>/albums` | Devuelve los álbumes del artista ordenados por título (`album_id`, `title`, `artist_id`). Responde 404 si el artista no existe y `[]` si existe pero no tiene álbumes. Si la base no se puede abrir o consultar, responde 500 con `{"error": "Database unavailable"}`; si una fila no es válida, 500 con `{"error": "Invalid data in database"}`. El detalle del error queda en el log del servidor, no en la respuesta. |
 
 ### Ejemplos
 
@@ -75,6 +75,10 @@ curl localhost:5000/db/artists/1/albums
 
 curl localhost:5000/db/artists/999999/albums
 # {"error": "Artist not found"}   (HTTP 404)
+
+# Con CHINOOK_DB_PATH apuntando a una base que no existe:
+curl localhost:5000/db/artists/1/albums
+# {"error": "Database unavailable"}   (HTTP 500)
 ```
 
 ## Reporte de artistas

@@ -1,7 +1,10 @@
 """Tests for the chinook.db-backed Blueprint routes."""
 
+import os
 import shutil
 import sqlite3
+import subprocess
+import sys
 from contextlib import closing
 
 import pytest
@@ -190,3 +193,27 @@ def test_reporter_cli_accepts_a_db_path_with_tilde(tmp_path, monkeypatch, capsys
 
     assert exit_code == 0
     assert capsys.readouterr().out.splitlines()[1].startswith("1,AC/DC,2,18,")
+
+
+def test_missing_database_answers_json_500(tmp_path):
+    """With CHINOOK_DB_PATH pointing nowhere, /db answers a JSON 500, not HTML."""
+    code = (
+        "from music_analytics_api.app import create_app\n"
+        "response = create_app().test_client().get('/db/artists/1/albums')\n"
+        "print(response.status_code, response.mimetype, response.get_json())"
+    )
+    env = {**os.environ, "CHINOOK_DB_PATH": str(tmp_path / "missing.db")}
+
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert (
+        result.stdout.strip()
+        == "500 application/json {'error': 'Database unavailable'}"
+    )
