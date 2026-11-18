@@ -74,7 +74,7 @@ La tarea solo está terminada cuando la suite completa pasa y ruff no reporta er
 - No corregir bugs en silencio (eso cambia el comportamiento); infórmalos.
 - No cambiar la API pública: rutas, nombres de campos JSON, códigos de estado, mensajes de error, firmas de funciones usadas por otros módulos.
 - No cambiar dependencias ni la configuración del proyecto.
-- En este repo: no romper el orden de importación entre `app.py` y `routes.py` (`app.py` importa `routes` **después** de crear `app`; ver `CLAUDE.md`). No muevas `import routes  # noqa: F401` al bloque de imports superior ni quites su `noqa`.
+- En este repo: las rutas se registran con Blueprints dentro de `create_app()` (ver `CLAUDE.md`). No vuelvas a crear una instancia global de la app ni hagas que un módulo de rutas importe `app.py`: eso reintroduce el bug de las dos instancias que cubre `tests/test_app.py`.
 - No mutar el `music_store` global de forma que cambie los datos iniciales.
 
 ## Problemas del entorno

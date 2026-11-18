@@ -1,16 +1,17 @@
 """API Routes for Music Analytics."""
 
-from flask import jsonify, request
+from flask import Blueprint, jsonify, request
 
 from music_analytics_api.analytics import (
     calculate_album_stats,
     calculate_average_tracks,
 )
-from music_analytics_api.app import app
 from music_analytics_api.models import Album, music_store
 
 MAX_QUERY_LENGTH = 100
 POPULARITY_PER_TRACK = 5  # Simple popularity metric: each track adds 5 points
+
+api_bp = Blueprint("api", __name__)
 
 
 def _error_response(message: str, status: int):
@@ -38,14 +39,14 @@ def _album_stats_input(album: Album) -> dict:
     }
 
 
-@app.route("/artists", methods=["GET"])
+@api_bp.route("/artists", methods=["GET"])
 def get_artists():
     """Return all artists."""
     artists = music_store.get_all_artists()
     return _jsonify_all(artists)
 
 
-@app.route("/artists/search", methods=["GET"])
+@api_bp.route("/artists/search", methods=["GET"])
 def search_artists():
     """Return artists whose name matches the 'q' query parameter (case-insensitive substring)."""
     query = request.args.get("q", "").strip()
@@ -59,7 +60,7 @@ def search_artists():
     return _jsonify_all(artists)
 
 
-@app.route("/artists/<int:artist_id>", methods=["GET"])
+@api_bp.route("/artists/<int:artist_id>", methods=["GET"])
 def get_artist(artist_id: int):
     """Return a single artist by ID."""
     artist = music_store.get_artist(artist_id)
@@ -68,7 +69,7 @@ def get_artist(artist_id: int):
     return jsonify(artist.to_dict())
 
 
-@app.route("/artists/<int:artist_id>/albums", methods=["GET"])
+@api_bp.route("/artists/<int:artist_id>/albums", methods=["GET"])
 def get_artist_albums(artist_id: int):
     """Return all albums for an artist."""
     artist = music_store.get_artist(artist_id)
@@ -77,14 +78,14 @@ def get_artist_albums(artist_id: int):
     return _jsonify_all(artist.albums)
 
 
-@app.route("/albums", methods=["GET"])
+@api_bp.route("/albums", methods=["GET"])
 def get_albums():
     """Return all albums."""
     albums = music_store.get_all_albums()
     return _jsonify_all(albums)
 
 
-@app.route("/stats/albums", methods=["GET"])
+@api_bp.route("/stats/albums", methods=["GET"])
 def get_album_stats():
     """Return album statistics."""
     albums = music_store.get_all_albums()
@@ -92,7 +93,7 @@ def get_album_stats():
     return jsonify(stats)
 
 
-@app.route("/stats/average-tracks", methods=["GET"])
+@api_bp.route("/stats/average-tracks", methods=["GET"])
 def get_average_tracks():
     """Return average tracks per album."""
     albums = music_store.get_all_albums()

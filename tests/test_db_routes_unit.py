@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from music_analytics_api import db_routes
-from music_analytics_api.app import app
+from music_analytics_api.app import create_app
 
 
 def make_fake_connection(artist_row, album_rows):
@@ -35,6 +35,7 @@ def fake_db(monkeypatch):
 
 
 def call_handler(artist_id):
+    app = create_app()
     with app.test_request_context():
         response = app.make_response(db_routes.get_artist_albums(artist_id))
     return response.status_code, response.get_json()
