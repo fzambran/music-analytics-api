@@ -29,5 +29,10 @@ def create_app() -> Flask:
     return app
 
 
-if __name__ == "__main__":
+def run_server() -> None:
+    """Run the development server; FLASK_DEBUG=1 turns on debug mode."""
     create_app().run(debug=os.environ.get("FLASK_DEBUG") == "1")
+
+
+if __name__ == "__main__":
+    run_server()

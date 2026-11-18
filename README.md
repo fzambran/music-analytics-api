@@ -23,6 +23,7 @@ uv sync
 uv run flask --app music_analytics_api.app run           # inicia la API en http://localhost:5000
 uv run flask --app music_analytics_api.app --debug run   # inicia la API en modo debug
 uv run python -m music_analytics_api.app                 # alternativa sin la CLI de flask (FLASK_DEBUG=1 para debug)
+uv run music-analytics-api                               # lo mismo, con el script de consola del paquete
 ```
 
 En macOS, el puerto 5000 suele estar ocupado por AirPlay; usa otro con `run --port 5001`.
