@@ -9,6 +9,8 @@ wheels/
 # Virtual environments
 .venv
 flask_session/
+# Flask instance folder (session files); src/instance/ in an editable install
+instance/
 
 # macOS
 .DS_Store

@@ -1,5 +1,6 @@
 """Blueprint with routes backed by the Chinook SQLite database."""
 
+import os
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -8,7 +9,9 @@ from flask import Blueprint, jsonify
 from pydantic import BaseModel, Field
 
 # src/music_analytics_api/db_routes.py -> <repo>/data/chinook.db (development checkout).
-CHINOOK_DB_PATH = Path(__file__).resolve().parents[2] / "data" / "chinook.db"
+# The wheel does not ship the database: set CHINOOK_DB_PATH when the package is installed.
+_DEFAULT_DB_PATH = Path(__file__).resolve().parents[2] / "data" / "chinook.db"
+CHINOOK_DB_PATH = Path(os.environ.get("CHINOOK_DB_PATH") or _DEFAULT_DB_PATH)
 
 db_bp = Blueprint("db", __name__, url_prefix="/db")
 

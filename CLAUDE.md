@@ -9,8 +9,8 @@ Creado con `uv init --package` y usado después para alojar la **variante base**
 Estructura del repositorio:
 
 - `src/music_analytics_api/`: todo el código de la aplicación. Los módulos de la API (`app.py`, `config.py`, `models.py`, `routes.py`, `db_routes.py`, `analytics.py`) y el script de reportes `reporter.py`. Entre ellos se importan con rutas absolutas (`from music_analytics_api.db_routes import ...`). `__init__.py` todavía contiene solo el `main()` de ejemplo generado al crear el proyecto.
-- `tests/`: las suites de pytest (`test_app.py`, `test_routes.py`, `test_db_routes.py`, `test_db_routes_unit.py`, `test_reporter.py`, `test_reporter_unit.py`) y `conftest.py`. `pyproject.toml` fija `testpaths = ["tests"]`. Las pruebas importan el paquete instalado en modo editable por `uv sync`, no archivos sueltos de la raíz.
-- `data/chinook.db`: la base Chinook. `CHINOOK_DB_PATH` la ubica respecto de `db_routes.py` (`parents[2] / "data"`), así que solo se encuentra desde una copia del repositorio; no se incluye en el wheel.
+- `tests/`: las suites de pytest (`test_app.py`, `test_routes.py`, `test_db_routes.py`, `test_db_routes_unit.py`, `test_reporter.py`, `test_reporter_unit.py`) y `conftest.py` (su hook solo escribe un resumen si `PYTEST_RESULTS_LOG` está definida). `pyproject.toml` fija `testpaths = ["tests"]`. Las pruebas importan el paquete instalado en modo editable por `uv sync`, no archivos sueltos de la raíz.
+- `data/chinook.db`: la base Chinook. `CHINOOK_DB_PATH` (en `db_routes.py`) se lee de la variable de entorno del mismo nombre al importar el módulo; si no está definida, la ubica respecto de `db_routes.py` (`parents[2] / "data"`), lo que solo funciona desde una copia del repositorio. La base no se incluye en el wheel.
 - `docs/`: documentación de diseño (`PLAN.md`).
 - La raíz contiene solo la configuración del proyecto, `README.md` y `CLAUDE.md`. Los archivos nuevos van en estas carpetas, no en la raíz.
 
@@ -20,7 +20,7 @@ El `README.md` documenta la instalación, el uso y los endpoints en español.
 
 - Python 3.12 (fijado en `.python-version`), gestionado con **uv**; el backend de build es `uv_build`.
 - Dependencias de ejecución: `flask`, `flask-session`, `cachelib`, `pydantic`. Dependencias de desarrollo (`[dependency-groups].dev`, instaladas por defecto con `uv sync`): `pytest`, `ruff`.
-- Ruff es el linter y formateador (reglas por defecto; la única configuración es `[tool.ruff.lint.isort] known-third-party = ["flask_session"]`, necesaria porque, de lo contrario, el directorio de sesiones `flask_session/` haría que ruff ordene ese paquete como first-party).
+- Ruff es el linter y formateador (reglas por defecto; la única configuración es `[tool.ruff.lint.isort] known-third-party = ["flask_session"]`, porque un directorio `flask_session/` en la raíz, como el que creaban las versiones anteriores al guardar sesiones en el directorio actual, haría que ruff ordene ese paquete como first-party; se mantiene para que el orden de imports no dependa de lo que haya en disco).
 - Estructura `src/`: el paquete `music_analytics_api` está en `src/music_analytics_api/`. El script de consola `music-analytics-api` apunta a `music_analytics_api:main` (`[project.scripts]` en `pyproject.toml`).
 - `.claude/agents/code-reviewer.md` es un subagente de revisión de solo lectura (nomenclatura, manejo de errores, rendimiento) que ejecuta ruff como parte de su revisión.
 - Skills del proyecto en `.claude/skills/`:
@@ -54,14 +54,14 @@ uv run python -m music_analytics_api.reporter --format json --top 5  # reporte d
 
 `uv run python -m music_analytics_api.app` también inicia la API (en el puerto 5000, con debug si `FLASK_DEBUG=1`).
 
-`SECRET_KEY` se lee del entorno; si no está definida, se genera una clave aleatoria por proceso.
+`SECRET_KEY` se lee del entorno; si no está definida, se genera una clave aleatoria por proceso. `CHINOOK_DB_PATH` cambia la base que usan `/db` y `reporter.py`.
 
 ## Arquitectura (Music Analytics API)
 
 Flujo de una petición: `create_app()` en `app.py` crea la app Flask, configura las sesiones y registra dos Blueprints: `api_bp` (`routes.py`, rutas en memoria, sin prefijo) y `db_bp` (`db_routes.py`, bajo `/db`). Ningún módulo importa `app.py` ni existe una instancia global de la app: `flask --app music_analytics_api.app` encuentra `create_app()` solo, y las pruebas crean su propia app con `create_app()` en cada fixture. Antes, `routes.py` hacía `from app import app` y registraba las rutas en esa instancia; al ejecutar el módulo como `__main__` había dos instancias y el servidor solo servía `/db` (`tests/test_app.py` cubre ese caso). Los handlers de las rutas usan `models.music_store` para obtener datos y `analytics.py` para las funciones estadísticas puras, y luego devuelven `jsonify(...)`.
 
 - `app.py`: la fábrica `create_app()` y el punto de entrada `python -m music_analytics_api.app`. Cada llamada a `create_app()` devuelve una app nueva e independiente.
-- `config.py`: configuración de Flask-Session basada en el sistema de archivos (`cachelib`); los archivos de sesión van a `flask_session/`.
+- `config.py`: configuración de Flask (`SECRET_KEY`, `SESSION_TYPE = "cachelib"`). El almacén de sesiones (`FileSystemCache`) no va aquí sino en `create_app()`, porque cachelib crea su carpeta al construirse: así importar el paquete no crea nada en disco y cada app tiene su propio almacén en `<instance_path>/flask_session` (`src/instance/` desde el repositorio). La app se crea con `Flask("music_analytics_api")`, no con `__name__`, para que la carpeta de instancia sea la misma con `python -m`.
 - `models.py`: capa de datos en memoria. Contiene las clases `Artist`/`Album` y un `MusicStore` que se carga al importarse con datos de ejemplo fijos en el código (5 artistas, 8 álbumes). Una única instancia `music_store` a nivel de módulo es el almacén compartido que usan todas las rutas.
 - `routes.py`: Blueprint `api_bp` con todos los handlers de rutas en memoria (`/artists`, `/artists/search`, `/artists/<id>`, `/artists/<id>/albums`, `/albums`, `/stats/albums`, `/stats/average-tracks`).
 - `db_routes.py`: Blueprint `db_bp` (`url_prefix="/db"`) respaldado por `data/chinook.db`. `GET /db/artists/<id>/albums` devuelve los álbumes del artista ordenados por título, o un 404 `{"error": "Artist not found"}` si el artista no está en la tabla `Artist`; si el artista existe pero no tiene álbumes, responde 200 con `[]`. Cada fila se valida y serializa con el modelo Pydantic `AlbumOut`, que mapea las columnas de Chinook (`AlbumId`, `Title`, `ArtistId`) a las claves de la API (`album_id`, `title`, `artist_id`; como la API en memoria pero sin `track_count`) mediante `validation_alias`. Una fila inválida provoca un `ValidationError` (500), no una respuesta con datos incorrectos. Cada petición abre una conexión de solo lectura (`mode=ro`) con `get_db_connection()`, que acepta una ruta opcional (por defecto `CHINOOK_DB_PATH`), usa consultas parametrizadas y la cierra al terminar. Como `routes.py`, no importa `app`: es `create_app()` quien llama a `app.register_blueprint(db_bp)`. El prefijo `/db` existe para no chocar con la ruta en memoria `/artists/<id>/albums` de `routes.py`. Se prueba en `test_db_routes.py` contra el `chinook.db` real (las tablas de Chinook tienen nombres en singular: `Artist`, `Album`, `Track`, ...).

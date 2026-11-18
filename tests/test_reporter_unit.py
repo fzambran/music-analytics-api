@@ -542,7 +542,7 @@ def test_export_unknown_format_writes_nothing():
 
 
 def test_cli_closed_pipe_exits_quietly():
-    """`reporter.py ... | head -c 10` must not print a traceback."""
+    """`python -m music_analytics_api.reporter ... | head -c 10` prints no traceback."""
     repo = Path(__file__).resolve().parents[1]
     process = subprocess.Popen(
         [

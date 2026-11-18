@@ -1,7 +1,7 @@
 """Per-artist statistics report from chinook.db, exportable to JSON or CSV.
 
 Usage:
-    uv run python reporter.py --format {json,csv} [--output PATH] [--db PATH]
+    uv run python -m music_analytics_api.reporter --format {json,csv} [--output PATH] [--db PATH]
         [--artist-id N | --artist NAME | --artist-contains TEXT]
         [--top N] [--sort-by FIELD] [--detail]
 """

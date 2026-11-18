@@ -31,5 +31,6 @@ dev = [
 testpaths = ["tests"]
 
 [tool.ruff.lint.isort]
-# The flask_session/ directory (session files) makes ruff treat the package as first-party.
+# A flask_session/ directory in the root (older versions stored sessions there) would make
+# ruff treat the package as first-party; pin it so import order never depends on the disk.
 known-third-party = ["flask_session"]
