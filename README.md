@@ -27,7 +27,14 @@ uv run python -m music_analytics_api.app                 # alternativa sin la CL
 
 En macOS, el puerto 5000 suele estar ocupado por AirPlay; usa otro con `run --port 5001`.
 
-La clave de sesión se lee de la variable de entorno `SECRET_KEY`. Si no está definida, se genera una clave aleatoria cada vez que arranca el proceso.
+Variables de entorno:
+
+| Variable | Uso |
+|---|---|
+| `SECRET_KEY` | Clave de sesión. Si no está definida, se genera una clave aleatoria cada vez que arranca el proceso. |
+| `CHINOOK_DB_PATH` | Ruta de la base Chinook que usan los endpoints `/db` y el reporte. Por defecto, `data/chinook.db` del repositorio. Es obligatoria si instalas el paquete como wheel, porque la base no viene incluida. |
+
+Las sesiones se guardan en la carpeta de instancia de Flask (`src/instance/flask_session/` al trabajar desde el repositorio), no en el directorio desde donde se inicia la API.
 
 ## Endpoints
 
@@ -86,7 +93,7 @@ uv run python -m music_analytics_api.reporter --format csv --detail --output rep
 |---|---|
 | `--format {json,csv}` | Formato de salida (obligatorio). |
 | `--output RUTA` | Archivo de salida en UTF-8. Crea los directorios que falten. Si se omite, escribe a stdout. |
-| `--db RUTA` | Base SQLite a leer, siempre en modo de solo lectura. Por defecto, `data/chinook.db` del repositorio. |
+| `--db RUTA` | Base SQLite a leer, siempre en modo de solo lectura. Por defecto, `CHINOOK_DB_PATH` o, si no está definida, `data/chinook.db` del repositorio. |
 | `--artist-id N` | Solo el artista con ese ID. |
 | `--artist NOMBRE` | Solo el artista con ese nombre exacto, con sus espacios y signos de puntuación (`acdc` no encuentra a `AC/DC`, `ac/dc` sí), sin distinguir mayúsculas, también en letras con acento (`"ANTÔNIO CARLOS JOBIM"` encuentra a `Antônio Carlos Jobim`). No se puede combinar con `--artist-id` ni con `--artist-contains`. |
 | `--artist-contains TEXTO` | Todos los artistas cuyo nombre contiene el texto, sin distinguir mayúsculas, acentos, espacios ni signos de puntuación (`acdc` encuentra a `AC/DC`, `guns n roses` a `Guns N' Roses` y `antonio` a `Antônio Carlos Jobim`). El texto debe tener al menos una letra o un número. Con textos cortos puede haber más coincidencias, porque la puntuación ya no separa las palabras. Se puede combinar con `--top` y `--sort-by`. No se puede combinar con `--artist-id` ni con `--artist`. |
@@ -152,3 +159,5 @@ uv run pytest                 # ejecutar las pruebas
 uv run ruff check .           # lint
 uv run ruff format .          # formatear el código
 ```
+
+Con `PYTEST_RESULTS_LOG=<ruta>`, cada ejecución de pytest agrega una línea con el resultado a ese archivo; sin la variable no escribe nada.
