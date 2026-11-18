@@ -1,11 +1,13 @@
 """Tests for the chinook.db-backed Blueprint routes."""
 
+import shutil
 import sqlite3
 from contextlib import closing
 
 import pytest
 from pydantic import ValidationError
 
+from music_analytics_api import reporter
 from music_analytics_api.app import create_app
 from music_analytics_api.db_routes import CHINOOK_DB_PATH, AlbumOut, get_db_connection
 
@@ -161,3 +163,30 @@ def test_get_db_connection_rows_accessible_by_column_name():
         ).fetchone()
     assert row["ArtistId"] == 1
     assert row["Name"] == "AC/DC"
+
+
+def test_get_db_connection_expands_the_home_directory(tmp_path, monkeypatch):
+    """A path with `~`, as given to --db, opens the file in the home directory."""
+    with closing(sqlite3.connect(tmp_path / "home.db")) as connection:
+        connection.execute("CREATE TABLE Marker (Value TEXT)")
+        connection.execute("INSERT INTO Marker VALUES ('home')")
+        connection.commit()
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    with closing(get_db_connection("~/home.db")) as connection:
+        assert (
+            connection.execute("SELECT Value FROM Marker").fetchone()["Value"] == "home"
+        )
+
+
+def test_reporter_cli_accepts_a_db_path_with_tilde(tmp_path, monkeypatch, capsys):
+    """`--db ~/chinook.db` reads the database instead of failing to open it."""
+    shutil.copy(CHINOOK_DB_PATH, tmp_path / "chinook.db")
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    exit_code = reporter.main(
+        ["--format", "csv", "--artist-id", "1", "--db", "~/chinook.db"]
+    )
+
+    assert exit_code == 0
+    assert capsys.readouterr().out.splitlines()[1].startswith("1,AC/DC,2,18,")
