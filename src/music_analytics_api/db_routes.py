@@ -5,8 +5,8 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
-from flask import Blueprint, jsonify
-from pydantic import BaseModel, Field
+from flask import Blueprint, current_app, jsonify
+from pydantic import BaseModel, Field, ValidationError
 
 # src/music_analytics_api/db_routes.py -> <repo>/data/chinook.db (development checkout).
 # The wheel does not ship the database: set CHINOOK_DB_PATH when the package is installed.
@@ -17,6 +17,22 @@ CHINOOK_DB_PATH = (
 )
 
 db_bp = Blueprint("db", __name__, url_prefix="/db")
+
+
+# Handled errors are not logged by Flask, so each handler logs the traceback itself;
+# the client only gets a generic message, never paths, SQL or validation details.
+@db_bp.errorhandler(sqlite3.Error)
+def _database_error(error: sqlite3.Error):
+    """Answer a failure to open or query chinook.db with a JSON 500."""
+    current_app.logger.exception("Chinook query failed")
+    return jsonify({"error": "Database unavailable"}), 500
+
+
+@db_bp.errorhandler(ValidationError)
+def _invalid_row_error(error: ValidationError):
+    """Answer a Chinook row that fails AlbumOut validation with a JSON 500."""
+    current_app.logger.exception("Invalid Chinook row")
+    return jsonify({"error": "Invalid data in database"}), 500
 
 
 class AlbumOut(BaseModel):

@@ -94,3 +94,48 @@ def test_closes_connection_when_artist_missing(fake_db):
     status, _ = call_handler(42)
     assert status == 404
     connection.close.assert_called_once()
+
+
+@pytest.fixture
+def api_client():
+    """Test client of a fresh app, without TESTING so errors go through Flask's handlers."""
+    return create_app().test_client()
+
+
+def test_database_error_answers_json_500_and_closes_connection(monkeypatch, api_client):
+    connection = MagicMock()
+    connection.execute.side_effect = db_routes.sqlite3.OperationalError("db locked")
+    monkeypatch.setattr(db_routes, "get_db_connection", lambda: connection)
+
+    response = api_client.get("/db/artists/7/albums")
+
+    assert response.status_code == 500
+    assert response.mimetype == "application/json"
+    assert response.get_json() == {"error": "Database unavailable"}
+    connection.close.assert_called_once()
+
+
+def test_invalid_row_answers_json_500(fake_db, api_client):
+    fake_db({"ArtistId": 3}, [{"AlbumId": 5, "Title": None, "ArtistId": 3}])
+
+    response = api_client.get("/db/artists/3/albums")
+
+    assert response.status_code == 500
+    assert response.mimetype == "application/json"
+    assert response.get_json() == {"error": "Invalid data in database"}
+
+
+def test_database_error_logs_traceback_but_hides_it_from_the_client(
+    monkeypatch, api_client, caplog
+):
+    connection = MagicMock()
+    connection.execute.side_effect = db_routes.sqlite3.OperationalError("secret detail")
+    monkeypatch.setattr(db_routes, "get_db_connection", lambda: connection)
+
+    response = api_client.get("/db/artists/7/albums")
+
+    assert "secret detail" not in response.get_data(as_text=True)
+    records = [r for r in caplog.records if r.name == "music_analytics_api"]
+    assert len(records) == 1
+    assert records[0].levelname == "ERROR"
+    assert "secret detail" in caplog.text
