@@ -7,7 +7,8 @@ from pathlib import Path
 from flask import Blueprint, jsonify
 from pydantic import BaseModel, Field
 
-CHINOOK_DB_PATH = Path(__file__).resolve().parent / "chinook.db"
+# src/music_analytics_api/db_routes.py -> <repo>/data/chinook.db (development checkout).
+CHINOOK_DB_PATH = Path(__file__).resolve().parents[2] / "data" / "chinook.db"
 
 db_bp = Blueprint("db", __name__, url_prefix="/db")
 

@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-import reporter
-from reporter import (
+from music_analytics_api import reporter
+from music_analytics_api.reporter import (
     ALBUM_FIELDS,
     FIELDS,
     AlbumStats,
@@ -543,9 +543,16 @@ def test_export_unknown_format_writes_nothing():
 
 def test_cli_closed_pipe_exits_quietly():
     """`reporter.py ... | head -c 10` must not print a traceback."""
-    repo = Path(__file__).resolve().parent
+    repo = Path(__file__).resolve().parents[1]
     process = subprocess.Popen(
-        [sys.executable, "reporter.py", "--format", "json", "--detail"],
+        [
+            sys.executable,
+            "-m",
+            "music_analytics_api.reporter",
+            "--format",
+            "json",
+            "--detail",
+        ],
         cwd=repo,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

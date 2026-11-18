@@ -20,9 +20,11 @@ uv sync
 ## Uso
 
 ```sh
-uv run flask run                     # inicia la API en http://localhost:5000
-FLASK_DEBUG=1 uv run python app.py   # inicia la API en modo debug
+uv run flask --app music_analytics_api.app run           # inicia la API en http://localhost:5000
+uv run flask --app music_analytics_api.app --debug run   # inicia la API en modo debug
 ```
+
+En macOS, el puerto 5000 suele estar ocupado por AirPlay; usa otro con `run --port 5001`.
 
 La clave de sesión se lee de la variable de entorno `SECRET_KEY`. Si no está definida, se genera una clave aleatoria cada vez que arranca el proceso.
 
@@ -46,7 +48,7 @@ Usan un conjunto fijo de ejemplo: 5 artistas y 8 álbumes.
 
 ### Base de datos Chinook
 
-Están agrupados en un Blueprint con el prefijo `/db` y leen `chinook.db` en modo de solo lectura.
+Están agrupados en un Blueprint con el prefijo `/db` y leen `data/chinook.db` en modo de solo lectura.
 
 | Endpoint | Descripción |
 |---|---|
@@ -68,22 +70,22 @@ curl localhost:5000/db/artists/999999/albums
 
 ## Reporte de artistas
 
-`reporter.py` genera estadísticas por artista a partir de `chinook.db` y las exporta a JSON o CSV. Incluye a todos los artistas, también a los que no tienen álbumes ni ventas (con valores en 0).
+`reporter.py` genera estadísticas por artista a partir de `data/chinook.db` y las exporta a JSON o CSV. Incluye a todos los artistas, también a los que no tienen álbumes ni ventas (con valores en 0).
 
 ```sh
-uv run python reporter.py --format json --top 5                # los 5 con más ingresos, a stdout
-uv run python reporter.py --format csv --output artistas.csv   # todos los artistas a un archivo
-uv run python reporter.py --format json --artist-id 90         # un solo artista por ID
-uv run python reporter.py --format csv --artist-contains orchestra   # todos los que contienen el texto
-uv run python reporter.py --format json --artist "iron maiden" --detail   # por nombre, con detalle por álbum
-uv run python reporter.py --format csv --detail --output reportes/albumes.csv   # una fila por álbum
+uv run python -m music_analytics_api.reporter --format json --top 5                # los 5 con más ingresos, a stdout
+uv run python -m music_analytics_api.reporter --format csv --output artistas.csv   # todos los artistas a un archivo
+uv run python -m music_analytics_api.reporter --format json --artist-id 90         # un solo artista por ID
+uv run python -m music_analytics_api.reporter --format csv --artist-contains orchestra   # todos los que contienen el texto
+uv run python -m music_analytics_api.reporter --format json --artist "iron maiden" --detail   # por nombre, con detalle por álbum
+uv run python -m music_analytics_api.reporter --format csv --detail --output reportes/albumes.csv   # una fila por álbum
 ```
 
 | Opción | Descripción |
 |---|---|
 | `--format {json,csv}` | Formato de salida (obligatorio). |
 | `--output RUTA` | Archivo de salida en UTF-8. Crea los directorios que falten. Si se omite, escribe a stdout. |
-| `--db RUTA` | Base SQLite a leer, siempre en modo de solo lectura. Por defecto, `chinook.db` del repositorio. |
+| `--db RUTA` | Base SQLite a leer, siempre en modo de solo lectura. Por defecto, `data/chinook.db` del repositorio. |
 | `--artist-id N` | Solo el artista con ese ID. |
 | `--artist NOMBRE` | Solo el artista con ese nombre exacto, con sus espacios y signos de puntuación (`acdc` no encuentra a `AC/DC`, `ac/dc` sí), sin distinguir mayúsculas, también en letras con acento (`"ANTÔNIO CARLOS JOBIM"` encuentra a `Antônio Carlos Jobim`). No se puede combinar con `--artist-id` ni con `--artist-contains`. |
 | `--artist-contains TEXTO` | Todos los artistas cuyo nombre contiene el texto, sin distinguir mayúsculas, acentos, espacios ni signos de puntuación (`acdc` encuentra a `AC/DC`, `guns n roses` a `Guns N' Roses` y `antonio` a `Antônio Carlos Jobim`). El texto debe tener al menos una letra o un número. Con textos cortos puede haber más coincidencias, porque la puntuación ya no separa las palabras. Se puede combinar con `--top` y `--sort-by`. No se puede combinar con `--artist-id` ni con `--artist`. |
@@ -122,17 +124,25 @@ Códigos de salida: `0` si todo salió bien; `1` si no se pudo abrir o consultar
 
 ## Estructura del proyecto
 
-| Archivo | Contenido |
+```
+music-analytics-api/
+├── src/music_analytics_api/   código de la aplicación (el paquete que se instala)
+├── tests/                     pruebas con pytest
+├── data/chinook.db            base de datos de ejemplo Chinook (SQLite)
+└── docs/                      documentación de diseño (PLAN.md)
+```
+
+| Módulo (`src/music_analytics_api/`) | Contenido |
 |---|---|
 | `app.py` | Crea la app Flask, configura las sesiones y registra las rutas. |
 | `config.py` | Configuración de Flask-Session (sesiones guardadas en `flask_session/`). |
 | `models.py` | Clases `Artist` y `Album` y el almacén en memoria con los datos de ejemplo. |
 | `routes.py` | Endpoints que usan los datos en memoria. |
-| `db_routes.py` | Blueprint `/db` con los endpoints que consultan `chinook.db` y el modelo Pydantic `AlbumOut` que valida sus respuestas. |
+| `db_routes.py` | Blueprint `/db` con los endpoints que consultan `data/chinook.db` y el modelo Pydantic `AlbumOut` que valida sus respuestas. |
 | `analytics.py` | Funciones puras de estadísticas usadas por `/stats/*`. |
-| `reporter.py` | CLI que genera estadísticas por artista desde `chinook.db` en JSON o CSV. |
-| `chinook.db` | Base de datos de ejemplo Chinook (SQLite). |
-| `test_routes.py`, `test_db_routes.py`, `test_reporter.py`, `test_reporter_unit.py` | Pruebas con pytest. |
+| `reporter.py` | CLI que genera estadísticas por artista desde `data/chinook.db` en JSON o CSV. |
+
+Las pruebas de `tests/` siguen el nombre del módulo que prueban (`test_routes.py`, `test_db_routes.py`, `test_reporter.py`, ...).
 
 ## Desarrollo
 

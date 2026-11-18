@@ -10,9 +10,9 @@ from dataclasses import asdict
 
 import pytest
 
-import reporter
-from db_routes import CHINOOK_DB_PATH, get_db_connection
-from reporter import (
+from music_analytics_api import reporter
+from music_analytics_api.db_routes import CHINOOK_DB_PATH, get_db_connection
+from music_analytics_api.reporter import (
     ArtistStats,
     find_artist_id,
     find_artist_ids_containing,

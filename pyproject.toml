@@ -27,6 +27,9 @@ dev = [
     "ruff>=0.17.3",
 ]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.ruff.lint.isort]
 # The flask_session/ directory (session files) makes ruff treat the package as first-party.
 known-third-party = ["flask_session"]

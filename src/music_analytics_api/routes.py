@@ -2,9 +2,12 @@
 
 from flask import jsonify, request
 
-from analytics import calculate_album_stats, calculate_average_tracks
-from app import app
-from models import Album, music_store
+from music_analytics_api.analytics import (
+    calculate_album_stats,
+    calculate_average_tracks,
+)
+from music_analytics_api.app import app
+from music_analytics_api.models import Album, music_store
 
 MAX_QUERY_LENGTH = 100
 POPULARITY_PER_TRACK = 5  # Simple popularity metric: each track adds 5 points

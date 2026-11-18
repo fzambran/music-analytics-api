@@ -29,8 +29,8 @@ git diff --staged -- . ':(exclude)uv.lock'
 | `fix` | Corrige un comportamiento incorrecto: respuesta, código de estado, código de salida, cálculo, mensaje de error. |
 | `refactor` | Cambia la estructura sin cambiar el comportamiento observable (la "regla de oro" de la skill `refactor`). |
 | `perf` | Más rápido o con menos memoria, sin cambiar el comportamiento. |
-| `test` | Solo pruebas: `test_*.py`, `conftest.py`. |
-| `docs` | Solo documentación: `README.md`, `CLAUDE.md`, `PLAN.md`, docstrings, comentarios. |
+| `test` | Solo pruebas: `tests/` (`test_*.py`, `conftest.py`). |
+| `docs` | Solo documentación: `README.md`, `CLAUDE.md`, `docs/` (`PLAN.md`), docstrings, comentarios. |
 | `style` | Solo formato (`ruff format`), sin cambios de lógica. |
 | `ci` | `.github/workflows/`. |
 | `chore` | Dependencias (`pyproject.toml`, `uv.lock`), `.gitignore`, `.python-version` y `.claude/` (skills, agentes, settings). |
@@ -39,7 +39,7 @@ El tipo lo decide el cambio principal: las pruebas y la documentación que acomp
 
 ## 3. Scope
 
-Los módulos están todos en la raíz, así que el scope sale del área, no del directorio:
+El código está en `src/music_analytics_api/` y las pruebas en `tests/`; el scope sale del área, no del directorio:
 
 | Scope | Código | Pruebas |
 |---|---|---|
