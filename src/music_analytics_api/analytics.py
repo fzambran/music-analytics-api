@@ -1,7 +1,11 @@
 """Music Analytics Functions."""
 
+from typing import Any
 
-def calculate_album_stats(albums, min_tracks=5, multiplier=1.2):
+
+def calculate_album_stats(
+    albums: list[dict[str, Any]], min_tracks: int = 5, multiplier: float = 1.2
+) -> list[dict[str, Any]]:
     """Process album data and return statistics for qualifying albums.
 
     Filters albums with track counts above min_tracks, applies a popularity
@@ -25,12 +29,12 @@ def calculate_album_stats(albums, min_tracks=5, multiplier=1.2):
     return sorted(output, key=lambda x: x["adjusted_popularity"], reverse=True)[:5]
 
 
-def calculate_average_tracks(albums: list[dict]) -> float:
+def calculate_average_tracks(albums: list[dict[str, Any]]) -> float:
     """Calculate average number of tracks per album.
 
     Returns the average track count across all albums, or 0.0 if there are none.
     """
     if not albums:
         return 0.0
-    total = sum(album.get("track_count", 0) for album in albums)
+    total: float = sum(album.get("track_count", 0) for album in albums)
     return total / len(albums)

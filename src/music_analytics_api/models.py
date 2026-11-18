@@ -4,18 +4,21 @@
 class Artist:
     """Represents a music artist."""
 
-    def __init__(self, artist_id, name):
+    def __init__(self, artist_id: int, name: str) -> None:
         self.artist_id = artist_id
         self.name = name
-        self.albums = []
+        self.albums: list[Album] = []
 
-    def add_album(self, album):
+    def add_album(self, album: "Album") -> None:
+        """Attach album to this artist."""
         self.albums.append(album)
 
-    def album_count(self):
+    def album_count(self) -> int:
+        """Return how many albums the artist has."""
         return len(self.albums)
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, int | str]:
+        """Return the JSON form: artist_id, name and album_count."""
         return {
             "artist_id": self.artist_id,
             "name": self.name,
@@ -26,13 +29,16 @@ class Artist:
 class Album:
     """Represents a music album."""
 
-    def __init__(self, album_id, title, artist_id, track_count=0):
+    def __init__(
+        self, album_id: int, title: str, artist_id: int, track_count: int = 0
+    ) -> None:
         self.album_id = album_id
         self.title = title
         self.artist_id = artist_id
         self.track_count = track_count
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, int | str]:
+        """Return the JSON form: album_id, title, artist_id and track_count."""
         return {
             "album_id": self.album_id,
             "title": self.title,
@@ -44,12 +50,12 @@ class Album:
 class MusicStore:
     """In-memory store for music data."""
 
-    def __init__(self):
-        self._artists = {}
-        self._albums = {}
+    def __init__(self) -> None:
+        self._artists: dict[int, Artist] = {}
+        self._albums: dict[int, Album] = {}
         self._load_sample_data()
 
-    def _load_sample_data(self):
+    def _load_sample_data(self) -> None:
         """Load sample music data."""
         artists_data = [
             (1, "AC/DC"),
@@ -79,19 +85,23 @@ class MusicStore:
             if artist_id in self._artists:
                 self._artists[artist_id].add_album(album)
 
-    def get_all_artists(self):
+    def get_all_artists(self) -> list[Artist]:
+        """Return every artist, in insertion order."""
         return list(self._artists.values())
 
-    def get_artist(self, artist_id):
+    def get_artist(self, artist_id: int) -> Artist | None:
+        """Return the artist with artist_id, or None if it does not exist."""
         return self._artists.get(artist_id)
 
-    def get_all_albums(self):
+    def get_all_albums(self) -> list[Album]:
+        """Return every album, in insertion order."""
         return list(self._albums.values())
 
-    def get_albums_by_artist(self, artist_id):
+    def get_albums_by_artist(self, artist_id: int) -> list[Album]:
+        """Return the albums of artist_id; empty if it has none or does not exist."""
         return [a for a in self._albums.values() if a.artist_id == artist_id]
 
-    def search_artists(self, query):
+    def search_artists(self, query: str) -> list[Artist]:
         """Return artists whose name contains query (case-insensitive)."""
         query = query.lower()
         return [a for a in self._artists.values() if query in a.name.lower()]
