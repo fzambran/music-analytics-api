@@ -39,7 +39,7 @@ Las sesiones se guardan en la carpeta de instancia de Flask (`src/instance/flask
 
 ## Endpoints
 
-Todos los endpoints responden en JSON y aceptan solo `GET`.
+Todos los endpoints aceptan solo `GET`. Las respuestas y los errores de la API (400 y 404, con la forma `{"error": "..."}`) son JSON. Los errores que genera Flask por su cuenta son páginas HTML: un 404 por una ruta que no existe, un 405 por otro método y un 500 si falla la base de datos.
 
 ### Datos en memoria
 
@@ -94,7 +94,7 @@ uv run python -m music_analytics_api.reporter --format csv --detail --output rep
 |---|---|
 | `--format {json,csv}` | Formato de salida (obligatorio). |
 | `--output RUTA` | Archivo de salida en UTF-8. Crea los directorios que falten. Si se omite, escribe a stdout. |
-| `--db RUTA` | Base SQLite a leer, siempre en modo de solo lectura. Por defecto, `CHINOOK_DB_PATH` o, si no está definida, `data/chinook.db` del repositorio. |
+| `--db RUTA` | Base SQLite a leer, siempre en modo de solo lectura. Acepta `~`. Por defecto, `CHINOOK_DB_PATH` o, si no está definida, `data/chinook.db` del repositorio. |
 | `--artist-id N` | Solo el artista con ese ID. |
 | `--artist NOMBRE` | Solo el artista con ese nombre exacto, con sus espacios y signos de puntuación (`acdc` no encuentra a `AC/DC`, `ac/dc` sí), sin distinguir mayúsculas, también en letras con acento (`"ANTÔNIO CARLOS JOBIM"` encuentra a `Antônio Carlos Jobim`). No se puede combinar con `--artist-id` ni con `--artist-contains`. |
 | `--artist-contains TEXTO` | Todos los artistas cuyo nombre contiene el texto, sin distinguir mayúsculas, acentos, espacios ni signos de puntuación (`acdc` encuentra a `AC/DC`, `guns n roses` a `Guns N' Roses` y `antonio` a `Antônio Carlos Jobim`). El texto debe tener al menos una letra o un número. Con textos cortos puede haber más coincidencias, porque la puntuación ya no separa las palabras. Se puede combinar con `--top` y `--sort-by`. No se puede combinar con `--artist-id` ni con `--artist`. |

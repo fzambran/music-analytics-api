@@ -33,7 +33,7 @@ def get_db_connection(path: Path | None = None) -> sqlite3.Connection:
     Uses chinook.db unless another SQLite file `path` is given. Raises
     sqlite3.OperationalError if the file does not exist (it is never created).
     """
-    db_path = Path(path).resolve() if path is not None else CHINOOK_DB_PATH
+    db_path = Path(path).expanduser().resolve() if path is not None else CHINOOK_DB_PATH
     connection = sqlite3.connect(f"{db_path.as_uri()}?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
     return connection
