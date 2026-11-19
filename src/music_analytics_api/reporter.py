@@ -432,12 +432,14 @@ def write_output(
     error never leaves an empty or half-written report. An existing file keeps its
     permissions, a symlink is written through, and a read-only file is not replaced.
     The file is opened with newline="" so CSV rows get no extra blank lines on
-    Windows. ValueError and OSError propagate.
+    Windows. A leading `~` expands to the home directory. ValueError and OSError
+    propagate.
     """
     stats = list(stats)
     _check_export(stats, fmt=fmt, detail=detail)
 
-    target = path.resolve()
+    # Expand ~ like --db: zsh leaves it in --output=~/..., and mkdir would create ./~.
+    target = path.expanduser().resolve()
     if target.is_dir():
         raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR), str(path))
     if target.exists() and not os.access(target, os.W_OK):
