@@ -384,8 +384,9 @@ def test_artist_id_with_non_ascii_digits_is_not_routed(client, artist_id):
     """Only ASCII digits are IDs, as for limit and offset; "٣" is not artist 3."""
     response = client.get(f"/artists/{artist_id}")
 
+    # The rule does not match: Flask's own HTML 404, not one of the API's JSON errors.
     assert response.status_code == 404
-    assert response.get_json(silent=True) != {"error": "Artist not found"}
+    assert response.mimetype == "text/html"
 
 
 def test_artist_id_with_leading_zeros_is_the_same_artist(client):

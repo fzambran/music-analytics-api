@@ -104,7 +104,7 @@ def test_db_artist_albums_artist_id_zero_not_found(client):
 
 @pytest.mark.parametrize("artist_id", [str(2**63), str(10**30), "9" * 5000])
 def test_db_artist_albums_id_beyond_sqlite_integers_not_found(client, artist_id):
-    """Flask routes any size of int, but no SQLite row can have an ID this large."""
+    """Huge IDs reach the view capped at SQLITE_MAX_INTEGER + 1: no row has one."""
     response = client.get(f"/db/artists/{artist_id}/albums")
     assert response.status_code == 404
     assert response.get_json() == {"error": "Artist not found"}

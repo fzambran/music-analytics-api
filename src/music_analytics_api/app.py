@@ -17,15 +17,13 @@ from music_analytics_api.validation import SQLITE_MAX_INTEGER, parse_unsigned_in
 SESSION_FILE_LIMIT = 500  # Max session files before cachelib prunes old ones
 
 
-def _route_int(value: str | int) -> int:
+def _route_int(value: str) -> int:
     """Convert a route segment with the project's integer rule (validation.py).
 
     ASCII digits with an optional "-" (only matched with signed=True); a value
     beyond SQLITE_MAX_INTEGER is capped just above it instead of calling int()
-    on thousands of digits. Ints pass through, for url_for().
+    on thousands of digits.
     """
-    if isinstance(value, int):
-        return value
     magnitude = value.removeprefix("-")
     number = parse_unsigned_int(magnitude, SQLITE_MAX_INTEGER)
     if number is None:
@@ -38,12 +36,22 @@ class AsciiIntConverter(IntegerConverter):
 
     Werkzeug matches any Unicode digit (so /artists/٣ was artist 3) and calls int(),
     which rejects more than 4300 digits; Werkzeug then reports "no route", and the
-    client got Flask's HTML 404 instead of the API's JSON one. fixed_digits, min,
-    max and signed keep working.
+    client got Flask's HTML 404 instead of the API's JSON one. fixed_digits, min and
+    signed keep working. So does max, up to SQLITE_MAX_INTEGER: any larger value
+    reaches the view as SQLITE_MAX_INTEGER + 1, so a max above that is not exact.
     """
 
     regex = r"[0-9]+"
     num_convert = staticmethod(_route_int)
+
+    def to_url(self, value: object) -> str:
+        """Build the segment for url_for() with Werkzeug's int(), as before.
+
+        The ASCII rule is for reading URLs; url_for() gets Python values such as
+        True or 3.0, which int() turns into "1" and "3".
+        """
+        value_str = str(int(value))  # type: ignore[call-overload]
+        return value_str.zfill(self.fixed_digits) if self.fixed_digits else value_str
 
 
 def create_app() -> Flask:

@@ -40,7 +40,7 @@ Variables de entorno:
 Con la API en marcha, abre `http://127.0.0.1:5000/ui` (o el puerto que uses) para probar los endpoints con un formulario:
 
 - Eliges el endpoint y completas sus parámetros (`artist_id`, `q`, `limit`, `offset`). Los parámetros de query vacíos no se envían, así que la API usa sus valores por defecto. El formulario muestra la URL que se enviará y puede copiarla como comando `curl`.
-- "Validar antes de enviar" revisa los parámetros en el navegador: los de la ruta según su tipo (por ejemplo, `artist_id` debe ser un entero), `q` (obligatorio, máximo 100 caracteres), `limit` (de 1 a 100) y `offset` (entero); desmárcalo para mandar valores inválidos y ver cómo responde la API.
+- "Validar antes de enviar" revisa los parámetros en el navegador: los de la ruta según su tipo (por ejemplo, `artist_id` debe ser un entero), `q` (obligatorio, máximo 100 caracteres), `limit` (de 1 a 100) y `offset` (de 0 a 2⁶³−1); desmárcalo para mandar valores inválidos y ver cómo responde la API.
 - Los casos de prueba rápidos envían peticiones que responden 200, 400 y 404, incluido un 404 en HTML de Flask.
 - La respuesta muestra el código de estado, el `Content-Type`, el tiempo y el número de resultados, como tabla o como JSON. La búsqueda, el filtro por columna numérica y el orden por columna se aplican en el navegador sobre la respuesta recibida, no son parámetros de la API.
 - Con una respuesta paginada (`/db/artists`), los botones "Anterior" y "Siguiente" piden la página vecina con el mismo `limit`, y el texto entre ellos indica el rango ("21–40 de 275").

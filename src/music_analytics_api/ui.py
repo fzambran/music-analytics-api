@@ -5,7 +5,7 @@ from typing import Literal, TypedDict
 
 from flask import Blueprint, current_app, render_template
 
-from music_analytics_api.db_routes import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
+from music_analytics_api.db_routes import DEFAULT_PAGE_SIZE, MAX_OFFSET, MAX_PAGE_SIZE
 from music_analytics_api.routes import MAX_QUERY_LENGTH
 
 ui_bp = Blueprint("ui", __name__, template_folder="templates")
@@ -170,5 +170,7 @@ def explorer() -> str:
             "max_query_length": MAX_QUERY_LENGTH,
             "default_page_size": DEFAULT_PAGE_SIZE,
             "max_page_size": MAX_PAGE_SIZE,
+            # As text: 2**63-1 is beyond JavaScript's exact integers (Number).
+            "max_offset": str(MAX_OFFSET),
         },
     )

@@ -9,7 +9,7 @@ from flask import Flask
 
 from music_analytics_api import ui
 from music_analytics_api.app import create_app
-from music_analytics_api.db_routes import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
+from music_analytics_api.db_routes import DEFAULT_PAGE_SIZE, MAX_OFFSET, MAX_PAGE_SIZE
 from music_analytics_api.routes import MAX_QUERY_LENGTH
 
 
@@ -188,6 +188,8 @@ def test_ui_uses_the_api_limits(client):
         "max_query_length": MAX_QUERY_LENGTH,
         "default_page_size": DEFAULT_PAGE_SIZE,
         "max_page_size": MAX_PAGE_SIZE,
+        # As text: 2**63-1 is beyond JavaScript's exact integers (the page uses BigInt).
+        "max_offset": str(MAX_OFFSET),
     }
     too_long = [p for p in ui.PRESETS if p["status"] == 400 and p["params"].get("q")]
     assert [len(p["params"]["q"]) for p in too_long] == [MAX_QUERY_LENGTH + 1]
