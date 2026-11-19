@@ -102,7 +102,7 @@ def test_db_artist_albums_artist_id_zero_not_found(client):
     assert response.get_json() == {"error": "Artist not found"}
 
 
-@pytest.mark.parametrize("artist_id", [2**63, 10**30])
+@pytest.mark.parametrize("artist_id", [str(2**63), str(10**30), "9" * 5000])
 def test_db_artist_albums_id_beyond_sqlite_integers_not_found(client, artist_id):
     """Flask routes any size of int, but no SQLite row can have an ID this large."""
     response = client.get(f"/db/artists/{artist_id}/albums")
@@ -117,7 +117,7 @@ def test_db_artist_albums_largest_sqlite_id_is_queried(client):
     assert response.get_json() == {"error": "Artist not found"}
 
 
-@pytest.mark.parametrize("artist_id", ["abc", "-1", "1.5"])
+@pytest.mark.parametrize("artist_id", ["abc", "-1", "1.5", "١", "３"])
 def test_db_artist_albums_invalid_artist_id_not_routed(client, artist_id):
     response = client.get(f"/db/artists/{artist_id}/albums")
     assert response.status_code == 404
