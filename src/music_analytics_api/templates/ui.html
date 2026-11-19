@@ -170,7 +170,7 @@
     </div>
 
     <div role="tabpanel" id="view-raw" aria-labelledby="tab-raw" hidden>
-      <pre class="raw" id="raw"></pre>
+      <pre class="raw" id="raw" tabindex="0" aria-label="Cuerpo de la respuesta"></pre>
     </div>
   </section>
 </main>
@@ -185,10 +185,16 @@
   const PRESETS = JSON.parse(document.getElementById("presets-data").textContent);
   // The API's own limit (routes.MAX_QUERY_LENGTH), so the form never drifts from it.
   const { max_query_length: MAX_QUERY_LENGTH } = JSON.parse(document.getElementById("limits-data").textContent);
+  // Help for known parameters; any other path parameter gets TYPE_HELP for its converter.
   const FIELD_HELP = {
     artist_id: "Entero. Memoria: 1–5 · Chinook: 1–275.",
     q: `Texto a buscar en el nombre del artista (obligatorio, máximo ${MAX_QUERY_LENGTH} caracteres).`,
   };
+  const TYPE_HELP = { int: "Entero mayor o igual que 0.", float: "Número con punto decimal, por ejemplo 1.5." };
+  // Flask's int and float converters only match unsigned digits ("1", "1.5"); anything
+  // else is not routed and gets Flask's HTML 404.
+  const TYPE_PATTERN = { int: /^\d+$/, float: /^\d+\.\d+$/ };
+  const typeOf = (ep, name) => ep.param_types[name] ?? "string";
   // Characters as Python's len() counts them: an emoji is 1, not 2 UTF-16 units.
   const charCount = (text) => [...text].length;
   const $ = (id) => document.getElementById(id);
@@ -221,7 +227,9 @@
       input.id = "param-" + name;
       input.name = name;
       input.autocomplete = "off";
-      if (name === "artist_id") { input.inputMode = "numeric"; input.placeholder = "1"; }
+      const type = typeOf(current(), name);
+      if (type === "int") { input.inputMode = "numeric"; input.placeholder = "1"; }
+      if (type === "float") input.inputMode = "decimal";
       input.value = values[name] ?? "";
       const help = document.createElement("div");
       help.className = "hint";
@@ -259,11 +267,18 @@
     return path + "?" + query.toString();
   }
 
+  // Path parameters are checked by their converter, not by name, so a new
+  // /albums/<int:album_id> route is validated without touching this code.
   function validationErrors(vals) {
+    const ep = current();
     const errors = {};
     for (const [name, value] of Object.entries(vals)) {
-      if (name === "artist_id" && !/^\d+$/.test(value)) {
-        errors[name] = "Debe ser un entero mayor o igual que 0.";
+      if (ep.path_params.includes(name)) {
+        const type = typeOf(ep, name);
+        if (!value) errors[name] = `${name} es obligatorio.`;
+        else if (TYPE_PATTERN[type] && !TYPE_PATTERN[type].test(value)) {
+          errors[name] = type === "int" ? "Debe ser un entero mayor o igual que 0." : "Debe ser un número como 1.5.";
+        } else if (type === "string" && value.includes("/")) errors[name] = "No puede contener /.";
       } else if (name === "q" && !value.trim()) {
         errors[name] = "q es obligatorio.";
       } else if (name === "q" && charCount(value.trim()) > MAX_QUERY_LENGTH) {
@@ -284,7 +299,8 @@
     const vals = values();
     for (const name of fieldsOf(current())) {
       const counter = name === "q" ? ` (${charCount(vals.q.trim())}/${MAX_QUERY_LENGTH})` : "";
-      $("help-" + name).textContent = FIELD_HELP[name] ? FIELD_HELP[name] + counter : counter;
+      const help = FIELD_HELP[name] ?? TYPE_HELP[typeOf(current(), name)] ?? "";
+      $("help-" + name).textContent = help + counter;
     }
     $("url-preview").textContent = "GET " + buildUrl(current(), vals);
     showErrors({});
@@ -475,9 +491,12 @@
       const button = document.createElement("button");
       button.type = "button";
       button.textContent = col + (sorted ? (state.sort.dir === 1 ? " ▲" : " ▼") : "");
+      button.dataset.col = col;
       button.addEventListener("click", () => {
         state.sort = { col, dir: sorted ? -state.sort.dir : 1 };
         renderTable();
+        // The table was rebuilt: give focus back to this column's (new) button.
+        [...$("table-wrap").querySelectorAll("th button")].find((b) => b.dataset.col === col)?.focus();
       });
       th.append(button);
       headRow.append(th);
@@ -511,7 +530,11 @@
   tabs.forEach((tab, i) => {
     tab.addEventListener("click", () => selectTab(tab));
     tab.addEventListener("keydown", (event) => {
-      if (event.key === "ArrowRight" || event.key === "ArrowLeft") selectTab(tabs[(i + 1) % tabs.length]);
+      const n = tabs.length;
+      const target = { ArrowRight: (i + 1) % n, ArrowLeft: (i - 1 + n) % n, Home: 0, End: n - 1 }[event.key];
+      if (target === undefined) return;
+      event.preventDefault();
+      selectTab(tabs[target]);
     });
   });
 

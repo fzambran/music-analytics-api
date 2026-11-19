@@ -5,6 +5,7 @@ import re
 from urllib.parse import urlencode
 
 import pytest
+from flask import Flask
 
 from music_analytics_api import ui
 from music_analytics_api.app import create_app
@@ -82,9 +83,36 @@ def test_ui_endpoint_parameters_match_the_routes(client):
     db_albums = endpoints["/db/artists/<int:artist_id>/albums"]
     assert db_albums["path"] == "/db/artists/{artist_id}/albums"
     assert db_albums["path_params"] == ["artist_id"]
+    assert db_albums["param_types"] == {"artist_id": "int"}
+    assert search["param_types"] == {}
     assert db_albums["query_params"] == []
     assert db_albums["group"] == "db"
     assert endpoints["/artists"]["group"] == "memory"
+
+
+def test_api_endpoints_reads_each_converter_from_the_rule():
+    """A new route gets its parameter types without changes to ui.py or the page."""
+    app = Flask("converters")
+
+    def view(**kwargs):
+        return ""
+
+    app.add_url_rule("/albums/<int(min=1):album_id>/<float:score>/<name>", "a", view)
+    app.add_url_rule("/upload", "b", view, methods=["POST"])
+
+    with app.test_request_context():
+        endpoints = ui.api_endpoints()
+
+    assert endpoints == [
+        {
+            "rule": "/albums/<int(min=1):album_id>/<float:score>/<name>",
+            "path": "/albums/{album_id}/{score}/{name}",
+            "path_params": ["album_id", "score", "name"],
+            "param_types": {"album_id": "int", "score": "float", "name": "string"},
+            "query_params": [],
+            "group": "memory",
+        }
+    ]
 
 
 def test_ui_presets_point_to_listed_endpoints(client):
