@@ -85,6 +85,8 @@
   @media (max-width: 600px) { .filters { grid-template-columns: 1fr 1fr; } }
   .filters label { font-size: .85rem; }
   .filters .count { color: var(--muted); font-size: .85rem; padding-bottom: 8px; white-space: nowrap; }
+  .pager { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 10px 0 4px; }
+  .pager button:disabled { opacity: .45; cursor: default; }
   .table-wrap { overflow-x: auto; }
   table { border-collapse: collapse; width: 100%; font-size: .9rem; }
   th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
@@ -165,7 +167,12 @@
         </div>
         <div class="count" id="row-count"></div>
       </div>
-      <div class="hint">Los filtros y el orden (clic en un encabezado) se aplican en el navegador, no en la API.</div>
+      <div class="hint">Los filtros y el orden (clic en un encabezado) se aplican en el navegador, no en la API; en una respuesta paginada, solo a la página actual.</div>
+      <nav class="pager" id="pager" aria-label="Páginas" hidden>
+        <button type="button" id="page-prev">← Anterior</button>
+        <span id="page-info" role="status"></span>
+        <button type="button" id="page-next">Siguiente →</button>
+      </nav>
       <div class="table-wrap" id="table-wrap"><p class="empty">Envía una petición para ver los resultados.</p></div>
     </div>
 
@@ -183,12 +190,19 @@
   "use strict";
   const ENDPOINTS = JSON.parse(document.getElementById("endpoints-data").textContent);
   const PRESETS = JSON.parse(document.getElementById("presets-data").textContent);
-  // The API's own limit (routes.MAX_QUERY_LENGTH), so the form never drifts from it.
-  const { max_query_length: MAX_QUERY_LENGTH } = JSON.parse(document.getElementById("limits-data").textContent);
+  // The API's own limits (routes.MAX_QUERY_LENGTH, db_routes page sizes), so the form
+  // never drifts from them.
+  const {
+    max_query_length: MAX_QUERY_LENGTH,
+    default_page_size: DEFAULT_PAGE_SIZE,
+    max_page_size: MAX_PAGE_SIZE,
+  } = JSON.parse(document.getElementById("limits-data").textContent);
   // Help for known parameters; any other path parameter gets TYPE_HELP for its converter.
   const FIELD_HELP = {
     artist_id: "Entero. Memoria: 1–5 · Chinook: 1–275.",
     q: `Texto a buscar en el nombre del artista (obligatorio, máximo ${MAX_QUERY_LENGTH} caracteres).`,
+    limit: `Resultados por página, de 1 a ${MAX_PAGE_SIZE}. Vacío: ${DEFAULT_PAGE_SIZE}.`,
+    offset: "Cuántos resultados saltar desde el principio. Vacío: 0.",
   };
   const TYPE_HELP = { int: "Entero mayor o igual que 0.", float: "Número con punto decimal, por ejemplo 1.5." };
   // Flask's int and float converters only match unsigned digits ("1", "1.5"); anything
@@ -244,14 +258,14 @@
     updatePreview();
   }
 
-  // Path parameters are trimmed here, once, so validation, preview, curl and the request
+  // Parameters are trimmed here, once, so validation, preview, curl and the request
   // all use the same value; q is sent as typed because the API strips it itself.
   function values() {
     const ep = current();
     const result = {};
     for (const name of fieldsOf(ep)) {
       const raw = $("param-" + name).value;
-      result[name] = ep.path_params.includes(name) ? raw.trim() : raw;
+      result[name] = name === "q" ? raw : raw.trim();
     }
     return result;
   }
@@ -261,10 +275,12 @@
     for (const name of ep.path_params) {
       path = path.replace("{" + name + "}", encodeURIComponent(vals[name] ?? ""));
     }
-    if (!ep.query_params.length) return path;
+    // Empty query parameters are left out, so the API applies its defaults
+    // (an empty q is still a 400: q is required).
     const query = new URLSearchParams();
-    for (const name of ep.query_params) query.set(name, vals[name] ?? "");
-    return path + "?" + query.toString();
+    for (const name of ep.query_params) if (vals[name]) query.set(name, vals[name]);
+    const search = query.toString();
+    return search ? path + "?" + search : path;
   }
 
   // Path parameters are checked by their converter, not by name, so a new
@@ -279,6 +295,10 @@
         else if (TYPE_PATTERN[type] && !TYPE_PATTERN[type].test(value)) {
           errors[name] = type === "int" ? "Debe ser un entero mayor o igual que 0." : "Debe ser un número como 1.5.";
         } else if (type === "string" && value.includes("/")) errors[name] = "No puede contener /.";
+      } else if (name === "limit" && value && !(/^\d+$/.test(value) && value >= 1 && value <= MAX_PAGE_SIZE)) {
+        errors[name] = `Debe ser un entero de 1 a ${MAX_PAGE_SIZE}.`;
+      } else if (typeOf(ep, name) === "int" && value && !TYPE_PATTERN.int.test(value)) {
+        errors[name] = "Debe ser un entero mayor o igual que 0.";
       } else if (name === "q" && !value.trim()) {
         errors[name] = "q es obligatorio.";
       } else if (name === "q" && charCount(value.trim()) > MAX_QUERY_LENGTH) {
@@ -363,6 +383,8 @@
   let inFlight = null;
 
   async function send(url) {
+    // Which form produced this request, so the pager can ask for the next page.
+    const origin = { endpoint: select.value, vals: values() };
     inFlight?.abort();
     const controller = (inFlight = new AbortController());
     const badges = $("badges");
@@ -383,10 +405,11 @@
       }
       inFlight = null;
       showResponse({ url, status: response.status, statusText: response.statusText,
-                     contentType, elapsed, body, json, isJson });
+                     contentType, elapsed, body, json, isJson, origin });
     } catch (error) {
       if (controller !== inFlight) return;  // Aborted by a newer request or by Limpiar.
       badges.replaceChildren(badge("Error de red", "err"), badge(String(error.message || error)));
+      showPager(null);
       setRows([], []);
       $("raw").textContent = "";
     }
@@ -401,6 +424,8 @@
 
   function showResponse(result) {
     const badges = $("badges");
+    const page = result && result.isJson ? pageOf(result.json) : null;
+    showPager(page && { ...page, origin: result.origin });
     if (!result) {
       badges.replaceChildren(badge("Sin peticiones todavía"));
       $("raw").textContent = "";
@@ -411,6 +436,7 @@
     const status = badge(`${result.status} ${result.statusText}`.trim(), kind);
     status.classList.add("status");
     const count = !result.isJson ? "—"
+      : page ? `${page.items.length} de ${page.total}`
       : Array.isArray(result.json) ? `${result.json.length} resultado${result.json.length === 1 ? "" : "s"}`
       : "1 objeto";
     badges.replaceChildren(status, badge(result.contentType || "sin Content-Type"),
@@ -421,7 +447,7 @@
       setRows([], [], "La respuesta no es JSON: revísala en la pestaña JSON.");
       return;
     }
-    const items = Array.isArray(result.json) ? result.json : [result.json];
+    const items = page ? page.items : Array.isArray(result.json) ? result.json : [result.json];
     const rows = items.map((item) =>
       item !== null && typeof item === "object" && !Array.isArray(item) ? item : { valor: item });
     const columns = [];
@@ -429,8 +455,42 @@
     // Flask sorts JSON keys alphabetically; show IDs first, then the name or title.
     const rank = (col) => (col.endsWith("_id") ? 0 : col === "name" || col === "title" ? 1 : 2);
     columns.sort((a, b) => rank(a) - rank(b));
-    setRows(rows, columns, "La respuesta es una lista vacía.");
+    setRows(rows, columns, page ? "Esta página no tiene resultados." : "La respuesta es una lista vacía.");
   }
+
+  // --- Pagination ------------------------------------------------------------
+  // A paginated response is {"items": [...], "total", "limit", "offset"} (GET /db/artists).
+  function pageOf(json) {
+    const isPage = json !== null && typeof json === "object" && Array.isArray(json.items) &&
+      ["total", "limit", "offset"].every((key) => Number.isInteger(json[key]));
+    return isPage ? json : null;
+  }
+
+  let pagerState = null;
+  function showPager(page) {
+    pagerState = page;
+    $("pager").hidden = !page;
+    if (!page) return;
+    const { items, total, limit, offset } = page;
+    $("page-info").textContent = items.length
+      ? `${offset + 1}–${offset + items.length} de ${total}`
+      : `Sin resultados desde ${offset + 1} (total: ${total})`;
+    $("page-prev").disabled = offset === 0;
+    $("page-next").disabled = offset + limit >= total;
+  }
+
+  function goToPage(direction) {
+    if (!pagerState) return;
+    const { limit, offset, total, origin } = pagerState;
+    // From an offset past the end, Anterior goes back to the last page.
+    const last = Math.max(0, Math.floor((total - 1) / limit) * limit);
+    const target = direction < 0 ? Math.min(Math.max(0, offset - limit), last) : offset + limit;
+    select.value = origin.endpoint;
+    renderParams({ ...origin.vals, limit: String(limit), offset: String(target) });
+    send(buildUrl(current(), values()));
+  }
+  $("page-prev").addEventListener("click", () => goToPage(-1));
+  $("page-next").addEventListener("click", () => goToPage(1));
 
   // --- Local filters, sorting and the table --------------------------------
   function setRows(rows, columns, emptyText = "Sin resultados.") {

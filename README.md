@@ -39,10 +39,12 @@ Variables de entorno:
 
 Con la API en marcha, abre `http://127.0.0.1:5000/ui` (o el puerto que uses) para probar los endpoints con un formulario:
 
-- Eliges el endpoint y completas sus parámetros (`artist_id`, `q`). El formulario muestra la URL que se enviará y puede copiarla como comando `curl`.
+- Eliges el endpoint y completas sus parámetros (`artist_id`, `q`, `limit`, `offset`). Los parámetros de query vacíos no se envían, así que la API usa sus valores por defecto. El formulario muestra la URL que se enviará y puede copiarla como comando `curl`.
 - "Validar antes de enviar" revisa `q` y `artist_id` en el navegador; desmárcalo para mandar valores inválidos y ver cómo responde la API.
 - Los casos de prueba rápidos envían peticiones que responden 200, 400 y 404, incluido un 404 en HTML de Flask.
 - La respuesta muestra el código de estado, el `Content-Type`, el tiempo y el número de resultados, como tabla o como JSON. La búsqueda, el filtro por columna numérica y el orden por columna se aplican en el navegador sobre la respuesta recibida, no son parámetros de la API.
+
+- Con una respuesta paginada (`/db/artists`), los botones "Anterior" y "Siguiente" piden la página vecina con el mismo `limit`, y el texto entre ellos indica el rango ("21–40 de 275").
 
 La página usa la misma API, así que no necesita CORS ni dependencias adicionales.
 
@@ -72,6 +74,7 @@ Están agrupados en un Blueprint con el prefijo `/db` y leen `data/chinook.db` e
 
 | Endpoint | Descripción |
 |---|---|
+| `/db/artists?limit=<n>&offset=<n>` | Lista los 275 artistas de Chinook por páginas, ordenados por `artist_id`. `limit` es el tamaño de la página (de 1 a 100; por defecto 20) y `offset`, cuántos artistas saltar (por defecto 0). Responde `{"items": [{"artist_id", "name"}, ...], "total", "limit", "offset"}`; con un `offset` mayor o igual que `total`, `items` es `[]`. Un `limit` u `offset` inválido (incluido un valor vacío) responde 400. |
 | `/db/artists/<artist_id>/albums` | Devuelve los álbumes del artista ordenados por título (`album_id`, `title`, `artist_id`). Responde 404 si el artista no existe y `[]` si existe pero no tiene álbumes. Si la base no se puede abrir o consultar, responde 500 con `{"error": "Database unavailable"}`; si una fila no es válida, 500 con `{"error": "Invalid data in database"}`. El detalle del error queda en el log del servidor, no en la respuesta. |
 
 ### Ejemplos
@@ -83,6 +86,13 @@ curl localhost:5000/artists/3
 curl localhost:5000/db/artists/1/albums
 # [{"album_id": 1, "artist_id": 1, "title": "For Those About To Rock We Salute You"},
 #  {"album_id": 4, "artist_id": 1, "title": "Let There Be Rock"}]
+
+curl 'localhost:5000/db/artists?limit=2&offset=20'
+# {"items": [{"artist_id": 21, "name": "Various Artists"}, {"artist_id": 22, "name": "Led Zeppelin"}],
+#  "limit": 2, "offset": 20, "total": 275}
+
+curl 'localhost:5000/db/artists?limit=0'
+# {"error": "Query parameter 'limit' must be an integer from 1 to 100"}   (HTTP 400)
 
 curl localhost:5000/db/artists/999999/albums
 # {"error": "Artist not found"}   (HTTP 404)

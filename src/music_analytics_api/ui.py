@@ -5,6 +5,7 @@ from typing import Literal, TypedDict
 
 from flask import Blueprint, current_app, render_template
 
+from music_analytics_api.db_routes import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from music_analytics_api.routes import MAX_QUERY_LENGTH
 
 ui_bp = Blueprint("ui", __name__, template_folder="templates")
@@ -25,13 +26,17 @@ class EndpointInfo(TypedDict):
     rule: str  # Flask rule, e.g. "/db/artists/<int:artist_id>/albums"
     path: str  # Same path with {name} placeholders: "/db/artists/{artist_id}/albums"
     path_params: list[str]
-    param_types: dict[str, str]  # Converter of each path parameter: "int", "string"...
+    param_types: dict[str, str]  # Type of each path and query parameter: "int"...
     query_params: list[str]
     group: Literal["memory", "db"]
 
 
-# Query-string parameters each endpoint reads; path parameters come from the URL rule.
-QUERY_PARAMS: dict[str, list[str]] = {"api.search_artists": ["q"]}
+# Query-string parameters each endpoint reads, with their type ("int" or "string");
+# path parameters and their types come from the URL rule.
+QUERY_PARAMS: dict[str, dict[str, str]] = {
+    "api.search_artists": {"q": "string"},
+    "db.list_artists": {"limit": "int", "offset": "int"},
+}
 
 # Quick test cases shown as buttons. The label starts with the status code they get;
 # tests/test_ui.py sends each one and checks it.
@@ -59,6 +64,24 @@ PRESETS: list[Preset] = [
         "rule": "/db/artists/<int:artist_id>/albums",
         "params": {"artist_id": "1"},
         "status": 200,
+    },
+    {
+        "label": "200 · /db/artists (página 1)",
+        "rule": "/db/artists",
+        "params": {},
+        "status": 200,
+    },
+    {
+        "label": "200 · /db/artists (última página)",
+        "rule": "/db/artists",
+        "params": {"limit": "20", "offset": "260"},
+        "status": 200,
+    },
+    {
+        "label": "400 · limit=0",
+        "rule": "/db/artists",
+        "params": {"limit": "0"},
+        "status": 400,
     },
     {
         "label": "400 · q vacío",
@@ -101,8 +124,9 @@ def api_endpoints() -> list[EndpointInfo]:
     """Describe every GET route of the current app except /ui, in registration order.
 
     Each item has the Flask rule, a path template with {name} placeholders, its path
-    parameters with their converter ("int", "string"...), its query parameters, and
-    its group: "db" for the /db Blueprint, else "memory".
+    and query parameters, the type of each one (the converter for path parameters,
+    QUERY_PARAMS for query parameters), and its group: "db" for the /db Blueprint,
+    else "memory".
     """
     endpoints: list[EndpointInfo] = []
     for rule in current_app.url_map.iter_rules():
@@ -111,13 +135,17 @@ def api_endpoints() -> list[EndpointInfo]:
         if "GET" not in (rule.methods or set()):
             continue
         variables = _RULE_VARIABLE.findall(rule.rule)
+        query = QUERY_PARAMS.get(rule.endpoint, {})
         endpoints.append(
             {
                 "rule": rule.rule,
                 "path": _RULE_VARIABLE.sub(r"{\2}", rule.rule),
                 "path_params": [name for _, name in variables],
-                "param_types": {name: conv or "string" for conv, name in variables},
-                "query_params": QUERY_PARAMS.get(rule.endpoint, []),
+                "param_types": {
+                    **{name: conv or "string" for conv, name in variables},
+                    **query,
+                },
+                "query_params": list(query),
                 "group": "db" if rule.endpoint.startswith("db.") else "memory",
             }
         )
@@ -131,5 +159,9 @@ def explorer() -> str:
         "ui.html",
         endpoints=api_endpoints(),
         presets=PRESETS,
-        limits={"max_query_length": MAX_QUERY_LENGTH},
+        limits={
+            "max_query_length": MAX_QUERY_LENGTH,
+            "default_page_size": DEFAULT_PAGE_SIZE,
+            "max_page_size": MAX_PAGE_SIZE,
+        },
     )
