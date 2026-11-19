@@ -28,6 +28,7 @@ from music_analytics_api.reporter import (
     validate_schema,
     write_output,
 )
+from music_analytics_api.validation import SQLITE_MAX_INTEGER
 
 SAMPLE = [
     ArtistStats(1, "AC/DC", 2, 18, 4853674, 269649, 15.0, 16, ("Rock",)),
@@ -428,9 +429,6 @@ def test_cli_partial_schema_names_missing_columns(sample_db_path, capsys):
 # Review fixes: integer limits
 
 
-SQLITE_MAX_INTEGER = 2**63 - 1
-
-
 @pytest.mark.parametrize("option", ["--top", "--artist-id"])
 def test_cli_rejects_integers_sqlite_cannot_bind(sample_db_path, capsys, option):
     argv = ["--format", "json", "--db", str(sample_db_path)]
@@ -440,6 +438,22 @@ def test_cli_rejects_integers_sqlite_cannot_bind(sample_db_path, capsys, option)
     err = capsys.readouterr().err
     assert f"debe ser menor o igual que {SQLITE_MAX_INTEGER}" in err
     assert "Traceback" not in err
+
+
+def test_cli_reports_a_huge_integer_as_too_large(sample_db_path, capsys):
+    """5000 digits is an integer, just too large: not "no es un número entero"."""
+    argv = ["--format", "json", "--db", str(sample_db_path)]
+    with pytest.raises(SystemExit) as excinfo:
+        reporter.main([*argv, "--top", "9" * 5000])
+    assert excinfo.value.code == 2
+    err = capsys.readouterr().err
+    assert f"debe ser menor o igual que {SQLITE_MAX_INTEGER}" in err
+    assert "no es un número entero" not in err
+
+
+def test_cli_accepts_leading_zeros(sample_db_path):
+    argv = ["--format", "json", "--db", str(sample_db_path)]
+    assert reporter.main([*argv, "--top", "001"]) == 0
 
 
 def test_cli_accepts_the_largest_sqlite_integer(sample_db_path, capsys):

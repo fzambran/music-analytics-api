@@ -149,7 +149,7 @@ Con `--detail`, cada álbum tiene `album_id`, `title`, `track_count`, `total_dur
 
 Antes de consultar, el reporte comprueba que la base tenga las tablas y columnas de Chinook que necesita (`Artist`, `Album`, `Track`, `Genre`, `InvoiceLine`). Si faltan, el error indica cuáles, por ejemplo: `error: otra.db no es una base Chinook válida: falta la tabla Artist`.
 
-Todos los mensajes de error están en español, también los de argumentos inválidos (por ejemplo, `error: argumento --top: '0' debe ser mayor o igual que 1`). Si no hay resultados para el artista pedido, el mensaje es `error: no se encontró el artista 'X'`, `error: no se encontró el artista con ID N` o `error: ningún artista contiene 'X' en el nombre`.
+Todos los mensajes de error están en español, también los de argumentos inválidos (por ejemplo, `error: argumento --top: '0' debe ser mayor o igual que 1`). `--top` y `--artist-id` aceptan solo dígitos, con las mismas reglas que `limit` y `offset` de la API: `005` vale 5, pero `+5`, `1_000` o un valor con espacios no son números enteros. Si no hay resultados para el artista pedido, el mensaje es `error: no se encontró el artista 'X'`, `error: no se encontró el artista con ID N` o `error: ningún artista contiene 'X' en el nombre`.
 
 Si falla una consulta después de abrir la base (por ejemplo, porque está bloqueada), el mensaje es `error: no se pudo consultar la base de datos <ruta>: ...`.
 Si se escribe a un archivo, un error nunca deja el reporte anterior vacío o a medias: el archivo se reemplaza solo cuando el nuevo está completo.
@@ -174,6 +174,7 @@ music-analytics-api/
 | `routes.py` | Blueprint con los endpoints que usan los datos en memoria. |
 | `db_routes.py` | Blueprint `/db` con los endpoints que consultan `data/chinook.db` y los modelos Pydantic `AlbumOut` y `ArtistOut` que validan sus respuestas. |
 | `analytics.py` | Funciones puras de estadísticas usadas por `/stats/*`. |
+| `validation.py` | Validación de enteros compartida por los endpoints `/db` y el reporte. |
 | `ui.py` y `templates/ui.html` | Blueprint `/ui`: el explorador de la API en el navegador. |
 | `reporter.py` | CLI que genera estadísticas por artista desde `data/chinook.db` en JSON o CSV. |
 
