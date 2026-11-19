@@ -94,7 +94,7 @@ Sin `path` usa `CHINOOK_DB_PATH`, así que la API Flask no cambia.
 ### CLI
 
 ```sh
-uv run python reporter.py --format {json,csv} [--output RUTA] [--db RUTA]
+uv run python -m music_analytics_api.reporter --format {json,csv} [--output RUTA] [--db RUTA]
     [--artist-id N | --artist NOMBRE | --artist-contains TEXTO]
     [--top N] [--sort-by CAMPO] [--detail]
 ```
@@ -141,7 +141,7 @@ No se traducen, a propósito: el texto de `--help`, los `ValueError` de las func
 
 ## Pruebas
 
-175 pruebas del reporte, dentro de las 252 del repositorio.
+175 pruebas del reporte, dentro de las 252 que tenía el repositorio al cerrar el plan (hoy son más).
 
 **`test_reporter.py`** (108, integración contra el `chinook.db` real):
 
@@ -211,14 +211,14 @@ Partes del plan original que quedaron obsoletas: la sección "Rama" (`feat/artis
 
 ```sh
 uv sync
-uv run pytest                                   # 252 pruebas
+uv run pytest                                   # 252 pruebas al cerrar el plan; hoy son más
 uv run ruff check . && uv run ruff format --check .
-uv run python reporter.py --format json --top 3              # Iron Maiden, U2, Metallica
-uv run python reporter.py --format csv --artist-contains jobim --detail
-uv run python reporter.py --format csv --artist-contains acdc               # AC/DC
-uv run python reporter.py --format json --artist-id 999999; echo "exit=$?"   # 1, mensaje en español
-uv run python reporter.py --format xml; echo "exit=$?"                       # 2, mensaje en español
-uv run python reporter.py --format json | head -c 20                         # sin traceback
+uv run python -m music_analytics_api.reporter --format json --top 3              # Iron Maiden, U2, Metallica
+uv run python -m music_analytics_api.reporter --format csv --artist-contains jobim --detail
+uv run python -m music_analytics_api.reporter --format csv --artist-contains acdc               # AC/DC
+uv run python -m music_analytics_api.reporter --format json --artist-id 999999; echo "exit=$?"   # 1, mensaje en español
+uv run python -m music_analytics_api.reporter --format xml; echo "exit=$?"                       # 2, mensaje en español
+uv run python -m music_analytics_api.reporter --format json | head -c 20                         # sin traceback
 ```
 
 El checksum de `chinook.db` no debe cambiar después de ejecutar el reporte y las pruebas.

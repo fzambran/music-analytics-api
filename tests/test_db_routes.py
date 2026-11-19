@@ -17,6 +17,7 @@ from music_analytics_api.db_routes import (
     DEFAULT_PAGE_SIZE,
     MAX_OFFSET,
     MAX_PAGE_SIZE,
+    SQLITE_MAX_INTEGER,
     AlbumOut,
     ArtistOut,
     get_db_connection,
@@ -97,6 +98,21 @@ def test_db_artist_albums_many_albums_sorted_and_complete(client):
 
 def test_db_artist_albums_artist_id_zero_not_found(client):
     response = client.get("/db/artists/0/albums")
+    assert response.status_code == 404
+    assert response.get_json() == {"error": "Artist not found"}
+
+
+@pytest.mark.parametrize("artist_id", [2**63, 10**30])
+def test_db_artist_albums_id_beyond_sqlite_integers_not_found(client, artist_id):
+    """Flask routes any size of int, but no SQLite row can have an ID this large."""
+    response = client.get(f"/db/artists/{artist_id}/albums")
+    assert response.status_code == 404
+    assert response.get_json() == {"error": "Artist not found"}
+
+
+def test_db_artist_albums_largest_sqlite_id_is_queried(client):
+    """2**63-1 is still a valid SQLite integer: it is looked up, and is not there."""
+    response = client.get(f"/db/artists/{SQLITE_MAX_INTEGER}/albums")
     assert response.status_code == 404
     assert response.get_json() == {"error": "Artist not found"}
 
