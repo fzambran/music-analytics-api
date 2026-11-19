@@ -23,7 +23,11 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import NoReturn, TextIO
 
-from music_analytics_api.db_routes import CHINOOK_DB_PATH, get_db_connection
+from music_analytics_api.db_routes import (
+    CHINOOK_DB_PATH,
+    SQLITE_MAX_INTEGER,
+    get_db_connection,
+)
 
 # Tables and columns the report reads. validate_schema checks them up front so a
 # SQLite file that is not a Chinook database gets a clear error.
@@ -457,10 +461,6 @@ def write_output(
         temporary.unlink(missing_ok=True)
 
 
-# Largest integer SQLite can bind; larger values raise OverflowError, not sqlite3.Error.
-_SQLITE_MAX_INTEGER = 2**63 - 1
-
-
 def _positive_int(value: str) -> int:
     """argparse type for integers between 1 and the largest SQLite integer."""
     try:
@@ -469,9 +469,9 @@ def _positive_int(value: str) -> int:
         raise argparse.ArgumentTypeError(f"{value!r} no es un número entero") from None
     if number < 1:
         raise argparse.ArgumentTypeError(f"{value!r} debe ser mayor o igual que 1")
-    if number > _SQLITE_MAX_INTEGER:
+    if number > SQLITE_MAX_INTEGER:
         raise argparse.ArgumentTypeError(
-            f"{value!r} debe ser menor o igual que {_SQLITE_MAX_INTEGER}"
+            f"{value!r} debe ser menor o igual que {SQLITE_MAX_INTEGER}"
         )
     return number
 

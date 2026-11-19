@@ -19,7 +19,10 @@ CHINOOK_DB_PATH = (
 
 DEFAULT_PAGE_SIZE = 20
 MAX_PAGE_SIZE = 100
-MAX_OFFSET = 2**63 - 1  # SQLite's largest integer: a bigger value cannot be bound
+# SQLite's largest integer: a bigger Python int cannot be bound to a query
+# (sqlite3 raises OverflowError, not sqlite3.Error), and no row can hold it.
+SQLITE_MAX_INTEGER = 2**63 - 1
+MAX_OFFSET = SQLITE_MAX_INTEGER
 # Plain ASCII digits only: int() would also accept " 5", "+5", "1_000" or "٥".
 _UNSIGNED_INT = re.compile(r"[0-9]+")
 
@@ -139,6 +142,8 @@ def get_artist_albums(artist_id: int):
 
     Responds 404 if the artist does not exist and 200 with `[]` if it has no albums.
     """
+    if artist_id > SQLITE_MAX_INTEGER:  # Flask's int converter has no upper bound
+        return jsonify({"error": "Artist not found"}), 404
     with closing(get_db_connection()) as connection:
         artist = connection.execute(
             "SELECT ArtistId FROM Artist WHERE ArtistId = ?", (artist_id,)
