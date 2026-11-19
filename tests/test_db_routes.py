@@ -12,7 +12,13 @@ from pydantic import ValidationError
 
 from music_analytics_api import reporter
 from music_analytics_api.app import create_app
-from music_analytics_api.db_routes import CHINOOK_DB_PATH, AlbumOut, get_db_connection
+from music_analytics_api.db_routes import (
+    CHINOOK_DB_PATH,
+    DEFAULT_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+    AlbumOut,
+    get_db_connection,
+)
 
 
 @pytest.fixture
@@ -217,3 +223,101 @@ def test_missing_database_answers_json_500(tmp_path):
         result.stdout.strip()
         == "500 application/json {'error': 'Database unavailable'}"
     )
+
+
+# --- GET /db/artists (paginated) --------------------------------------------
+
+
+def _chinook_artists() -> list[dict]:
+    """Every artist in chinook.db as the API returns it, ordered by ArtistId."""
+    uri = f"{CHINOOK_DB_PATH.as_uri()}?mode=ro"
+    with closing(sqlite3.connect(uri, uri=True)) as connection:
+        return [
+            {"artist_id": artist_id, "name": name}
+            for artist_id, name in connection.execute(
+                "SELECT ArtistId, Name FROM Artist ORDER BY ArtistId"
+            )
+        ]
+
+
+def test_db_artists_first_page_by_default(client):
+    response = client.get("/db/artists")
+
+    assert response.status_code == 200
+    assert response.mimetype == "application/json"
+    body = response.get_json()
+    assert body["total"] == 275
+    assert body["limit"] == DEFAULT_PAGE_SIZE == 20
+    assert body["offset"] == 0
+    assert body["items"] == _chinook_artists()[:20]
+    assert body["items"][0] == {"artist_id": 1, "name": "AC/DC"}
+
+
+def test_db_artists_pages_cover_every_artist_once(client):
+    """Walking the pages with limit/offset returns all 275 artists, in order."""
+    seen = []
+    offset = 0
+    while True:
+        body = client.get(
+            "/db/artists", query_string={"limit": 50, "offset": offset}
+        ).get_json()
+        if not body["items"]:
+            break
+        seen.extend(body["items"])
+        offset += 50
+
+    assert seen == _chinook_artists()
+    assert offset == 300
+
+
+def test_db_artists_last_partial_page(client):
+    body = client.get("/db/artists?limit=20&offset=260").get_json()
+
+    assert [artist["artist_id"] for artist in body["items"]] == list(range(261, 276))
+    assert (body["total"], body["limit"], body["offset"]) == (275, 20, 260)
+
+
+@pytest.mark.parametrize("offset", ["275", "1000", "99999999999999999999999"])
+def test_db_artists_offset_past_the_end_is_an_empty_page(client, offset):
+    """Past the last artist there is nothing left, even beyond SQLite's integers."""
+    response = client.get("/db/artists", query_string={"offset": offset})
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["items"] == []
+    assert body["total"] == 275
+    assert body["offset"] == int(offset)
+
+
+@pytest.mark.parametrize("limit", ["1", str(MAX_PAGE_SIZE)])
+def test_db_artists_accepts_limit_bounds(client, limit):
+    body = client.get("/db/artists", query_string={"limit": limit}).get_json()
+
+    assert len(body["items"]) == int(limit)
+
+
+@pytest.mark.parametrize(
+    ("params", "message"),
+    [
+        ({"limit": "0"}, "Query parameter 'limit' must be an integer from 1 to 100"),
+        ({"limit": "101"}, "Query parameter 'limit' must be an integer from 1 to 100"),
+        ({"limit": "abc"}, "Query parameter 'limit' must be an integer from 1 to 100"),
+        ({"limit": ""}, "Query parameter 'limit' must be an integer from 1 to 100"),
+        ({"limit": "-5"}, "Query parameter 'limit' must be an integer from 1 to 100"),
+        ({"limit": "2.5"}, "Query parameter 'limit' must be an integer from 1 to 100"),
+        ({"offset": "-1"}, "Query parameter 'offset' must be an integer of at least 0"),
+        ({"offset": "x"}, "Query parameter 'offset' must be an integer of at least 0"),
+        ({"offset": " 5"}, "Query parameter 'offset' must be an integer of at least 0"),
+        ({"offset": "+5"}, "Query parameter 'offset' must be an integer of at least 0"),
+        ({"offset": "٥"}, "Query parameter 'offset' must be an integer of at least 0"),
+    ],
+)
+def test_db_artists_rejects_invalid_paging_params(client, params, message):
+    response = client.get("/db/artists", query_string=params)
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": message}
+
+
+def test_db_artists_rejects_post(client):
+    assert client.post("/db/artists").status_code == 405

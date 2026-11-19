@@ -1,11 +1,12 @@
 """Blueprint with routes backed by the Chinook SQLite database."""
 
 import os
+import re
 import sqlite3
 from contextlib import closing
 from pathlib import Path
 
-from flask import Blueprint, current_app, jsonify
+from flask import Blueprint, current_app, jsonify, request
 from pydantic import BaseModel, Field, ValidationError
 
 # src/music_analytics_api/db_routes.py -> <repo>/data/chinook.db (development checkout).
@@ -15,6 +16,11 @@ _DEFAULT_DB_PATH = Path(__file__).resolve().parents[2] / "data" / "chinook.db"
 CHINOOK_DB_PATH = (
     Path(os.environ.get("CHINOOK_DB_PATH") or _DEFAULT_DB_PATH).expanduser().resolve()
 )
+
+DEFAULT_PAGE_SIZE = 20
+MAX_PAGE_SIZE = 100
+# Plain ASCII digits only: int() would also accept " 5", "+5", "1_000" or "٥".
+_UNSIGNED_INT = re.compile(r"[0-9]+")
 
 db_bp = Blueprint("db", __name__, url_prefix="/db")
 
@@ -30,7 +36,7 @@ def _database_error(error: sqlite3.Error):
 
 @db_bp.errorhandler(ValidationError)
 def _invalid_row_error(error: ValidationError):
-    """Answer a Chinook row that fails AlbumOut validation with a JSON 500."""
+    """Answer a Chinook row that fails AlbumOut or ArtistOut validation with a JSON 500."""
     current_app.logger.exception("Invalid Chinook row")
     return jsonify({"error": "Invalid data in database"}), 500
 
@@ -43,6 +49,13 @@ class AlbumOut(BaseModel):
     artist_id: int = Field(validation_alias="ArtistId")
 
 
+class ArtistOut(BaseModel):
+    """Artist as returned by the API, validated from a Chinook `Artist` row."""
+
+    artist_id: int = Field(validation_alias="ArtistId")
+    name: str | None = Field(validation_alias="Name")  # Artist.Name is nullable
+
+
 def get_db_connection(path: Path | None = None) -> sqlite3.Connection:
     """Open a read-only connection with rows accessible by column name.
 
@@ -53,6 +66,61 @@ def get_db_connection(path: Path | None = None) -> sqlite3.Connection:
     connection = sqlite3.connect(f"{db_path.as_uri()}?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
     return connection
+
+
+def _paging_param(name: str, default: int, minimum: int, maximum: int | None) -> int:
+    """Read a non-negative integer query parameter, or raise ValueError with the message.
+
+    A missing parameter gives `default`; an empty or non-numeric one is an error.
+    """
+    raw = request.args.get(name)
+    if raw is None:
+        return default
+    value = int(raw) if _UNSIGNED_INT.fullmatch(raw) else None
+    if maximum is not None:
+        if value is None or not minimum <= value <= maximum:
+            raise ValueError(
+                f"Query parameter '{name}' must be an integer from {minimum} to {maximum}"
+            )
+    elif value is None or value < minimum:
+        raise ValueError(
+            f"Query parameter '{name}' must be an integer of at least {minimum}"
+        )
+    return value
+
+
+@db_bp.route("/artists", methods=["GET"])
+def list_artists():
+    """Return one page of chinook.db artists, ordered by ArtistId.
+
+    Query parameters: `limit` (1 to MAX_PAGE_SIZE, default DEFAULT_PAGE_SIZE) and
+    `offset` (at least 0, default 0). Responds `{"items", "total", "limit", "offset"}`;
+    an offset past the last artist gives an empty `items`. Invalid values answer 400.
+    """
+    try:
+        limit = _paging_param("limit", DEFAULT_PAGE_SIZE, 1, MAX_PAGE_SIZE)
+        offset = _paging_param("offset", 0, 0, None)
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+
+    with closing(get_db_connection()) as connection:
+        total = connection.execute("SELECT COUNT(*) FROM Artist").fetchone()[0]
+        # Clamped to total: an offset beyond SQLite's 64-bit integers cannot be bound,
+        # and any offset >= total returns no rows anyway.
+        rows = connection.execute(
+            "SELECT ArtistId, Name FROM Artist ORDER BY ArtistId LIMIT ? OFFSET ?",
+            (limit, min(offset, total)),
+        ).fetchall()
+
+    artists = [ArtistOut.model_validate(dict(row)) for row in rows]
+    return jsonify(
+        {
+            "items": [artist.model_dump() for artist in artists],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+    )
 
 
 @db_bp.route("/artists/<int:artist_id>/albums", methods=["GET"])

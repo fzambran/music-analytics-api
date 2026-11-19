@@ -20,7 +20,7 @@ IN_MEMORY_RULES = {
     "/stats/albums",
     "/stats/average-tracks",
 }
-DB_RULES = {"/db/artists/<int:artist_id>/albums"}
+DB_RULES = {"/db/artists", "/db/artists/<int:artist_id>/albums"}
 UI_RULES = {"/ui"}
 ALL_RULES = IN_MEMORY_RULES | DB_RULES | UI_RULES
 

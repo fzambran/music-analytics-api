@@ -139,3 +139,15 @@ def test_database_error_logs_traceback_but_hides_it_from_the_client(
     assert len(records) == 1
     assert records[0].levelname == "ERROR"
     assert "secret detail" in caplog.text
+
+
+def test_list_artists_database_error_answers_json_500(monkeypatch, api_client):
+    connection = MagicMock()
+    connection.execute.side_effect = db_routes.sqlite3.OperationalError("db locked")
+    monkeypatch.setattr(db_routes, "get_db_connection", lambda: connection)
+
+    response = api_client.get("/db/artists")
+
+    assert response.status_code == 500
+    assert response.get_json() == {"error": "Database unavailable"}
+    connection.close.assert_called_once()

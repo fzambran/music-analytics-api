@@ -9,6 +9,7 @@ from flask import Flask
 
 from music_analytics_api import ui
 from music_analytics_api.app import create_app
+from music_analytics_api.db_routes import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from music_analytics_api.routes import MAX_QUERY_LENGTH
 
 
@@ -44,7 +45,7 @@ def _fill(path_template: str, params: dict[str, str]) -> str:
         placeholder = "{" + name + "}"
         if placeholder in path:
             path = path.replace(placeholder, value)
-        else:
+        elif value:  # Like the page: empty query parameters are left out.
             query[name] = value
     return f"{path}?{urlencode(query)}" if query else path
 
@@ -84,7 +85,13 @@ def test_ui_endpoint_parameters_match_the_routes(client):
     assert db_albums["path"] == "/db/artists/{artist_id}/albums"
     assert db_albums["path_params"] == ["artist_id"]
     assert db_albums["param_types"] == {"artist_id": "int"}
-    assert search["param_types"] == {}
+    assert search["param_types"] == {"q": "string"}
+
+    db_artists = endpoints["/db/artists"]
+    assert db_artists["path_params"] == []
+    assert db_artists["query_params"] == ["limit", "offset"]
+    assert db_artists["param_types"] == {"limit": "int", "offset": "int"}
+    assert db_artists["group"] == "db"
     assert db_albums["query_params"] == []
     assert db_albums["group"] == "db"
     assert endpoints["/artists"]["group"] == "memory"
@@ -140,14 +147,16 @@ def test_ui_presets_cover_200_400_and_404():
     assert {preset["status"] for preset in ui.PRESETS} == {200, 400, 404}
 
 
-def test_ui_uses_the_api_query_length_limit(client):
-    """The form validates q with the API's limit, not a copy that can drift from it."""
+def test_ui_uses_the_api_limits(client):
+    """The form validates q and limit with the API's limits, not copies that can drift."""
     html = client.get("/ui").get_data(as_text=True)
 
-    assert _page_data(html, "limits-data") == {"max_query_length": MAX_QUERY_LENGTH}
-    too_long = [
-        p for p in ui.PRESETS if p["status"] == 400 and len(p["params"]["q"]) > 0
-    ]
+    assert _page_data(html, "limits-data") == {
+        "max_query_length": MAX_QUERY_LENGTH,
+        "default_page_size": DEFAULT_PAGE_SIZE,
+        "max_page_size": MAX_PAGE_SIZE,
+    }
+    too_long = [p for p in ui.PRESETS if p["status"] == 400 and p["params"].get("q")]
     assert [len(p["params"]["q"]) for p in too_long] == [MAX_QUERY_LENGTH + 1]
 
 
