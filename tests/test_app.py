@@ -21,6 +21,8 @@ IN_MEMORY_RULES = {
     "/stats/average-tracks",
 }
 DB_RULES = {"/db/artists/<int:artist_id>/albums"}
+UI_RULES = {"/ui"}
+ALL_RULES = IN_MEMORY_RULES | DB_RULES | UI_RULES
 
 
 def _rules(app: Flask) -> set[str]:
@@ -29,7 +31,7 @@ def _rules(app: Flask) -> set[str]:
 
 
 def test_running_module_as_main_serves_every_route(monkeypatch):
-    """`python -m music_analytics_api.app` must serve the in-memory routes too."""
+    """`python -m music_analytics_api.app` must serve the in-memory and /ui routes too."""
     served = []
     monkeypatch.setattr(Flask, "run", lambda self, **kwargs: served.append(self))
 
@@ -38,7 +40,7 @@ def test_running_module_as_main_serves_every_route(monkeypatch):
     runpy.run_module("music_analytics_api.app", run_name="__main__")
 
     assert len(served) == 1
-    assert _rules(served[0]) == IN_MEMORY_RULES | DB_RULES
+    assert _rules(served[0]) == ALL_RULES
 
 
 @pytest.mark.parametrize("debug_env, expected", [("1", True), (None, False)])
@@ -65,7 +67,7 @@ def test_create_app_returns_independent_apps_with_every_route():
 
     assert first is not second
     assert second.config["TESTING"] is False
-    assert _rules(first) == _rules(second) == IN_MEMORY_RULES | DB_RULES
+    assert _rules(first) == _rules(second) == ALL_RULES
 
 
 def _run_python(code: str, cwd, env_overrides: dict[str, str] | None = None) -> str:
@@ -155,7 +157,7 @@ def test_console_script_main_runs_the_full_api(monkeypatch, debug_env, expected)
 
     main()
 
-    assert served == [(IN_MEMORY_RULES | DB_RULES, {"debug": expected})]
+    assert served == [(ALL_RULES, {"debug": expected})]
 
 
 @pytest.mark.parametrize("relative", ["other.db", "nested/../other.db"])
