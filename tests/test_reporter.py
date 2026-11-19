@@ -510,6 +510,26 @@ def test_cli_artist_contains_without_matches_exits_1(capsys):
             ["--format", "json", "--top", "0"],
             "error: argumento --top: '0' debe ser mayor o igual que 1",
         ),
+        (
+            ["--format", "json", "--top", "-1"],
+            "error: argumento --top: '-1' debe ser mayor o igual que 1",
+        ),
+        (
+            ["--format", "json", "--top", "+5"],
+            "error: argumento --top: '+5' no es un número entero",
+        ),
+        (
+            ["--format", "json", "--top", " 5"],
+            "error: argumento --top: ' 5' no es un número entero",
+        ),
+        (
+            ["--format", "json", "--top", "1_000"],
+            "error: argumento --top: '1_000' no es un número entero",
+        ),
+        (
+            ["--format", "json", "--artist-id", "٥"],
+            "error: argumento --artist-id: '٥' no es un número entero",
+        ),
         (["--format", "json", "--top"], "error: argumento --top: se esperaba un valor"),
         (
             ["--format", "json", "--artist-contains", " "],

@@ -23,11 +23,8 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import NoReturn, TextIO
 
-from music_analytics_api.db_routes import (
-    CHINOOK_DB_PATH,
-    SQLITE_MAX_INTEGER,
-    get_db_connection,
-)
+from music_analytics_api.db_routes import CHINOOK_DB_PATH, get_db_connection
+from music_analytics_api.validation import SQLITE_MAX_INTEGER, parse_unsigned_int
 
 # Tables and columns the report reads. validate_schema checks them up front so a
 # SQLite file that is not a Chinook database gets a clear error.
@@ -462,11 +459,18 @@ def write_output(
 
 
 def _positive_int(value: str) -> int:
-    """argparse type for integers between 1 and the largest SQLite integer."""
-    try:
-        number = int(value)
-    except ValueError:
-        raise argparse.ArgumentTypeError(f"{value!r} no es un número entero") from None
+    """argparse type for integers between 1 and the largest SQLite integer.
+
+    Same rules as the /db query parameters (validation.parse_unsigned_int): only
+    ASCII digits, so " 5", "+5", "1_000" or "٥" are not integers here.
+    """
+    number = parse_unsigned_int(value, SQLITE_MAX_INTEGER)
+    if number is None:
+        # "-3" is an integer, just below the minimum: say so instead of "not a number".
+        magnitude = value.removeprefix("-")
+        if magnitude != value and magnitude.isascii() and magnitude.isdigit():
+            raise argparse.ArgumentTypeError(f"{value!r} debe ser mayor o igual que 1")
+        raise argparse.ArgumentTypeError(f"{value!r} no es un número entero")
     if number < 1:
         raise argparse.ArgumentTypeError(f"{value!r} debe ser mayor o igual que 1")
     if number > SQLITE_MAX_INTEGER:

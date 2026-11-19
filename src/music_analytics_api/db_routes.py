@@ -1,13 +1,14 @@
 """Blueprint with routes backed by the Chinook SQLite database."""
 
 import os
-import re
 import sqlite3
 from contextlib import closing
 from pathlib import Path
 
 from flask import Blueprint, current_app, jsonify, request
 from pydantic import BaseModel, Field, ValidationError
+
+from music_analytics_api.validation import SQLITE_MAX_INTEGER, parse_unsigned_int
 
 # src/music_analytics_api/db_routes.py -> <repo>/data/chinook.db (development checkout).
 # The wheel does not ship the database: set CHINOOK_DB_PATH when the package is installed.
@@ -19,12 +20,7 @@ CHINOOK_DB_PATH = (
 
 DEFAULT_PAGE_SIZE = 20
 MAX_PAGE_SIZE = 100
-# SQLite's largest integer: a bigger Python int cannot be bound to a query
-# (sqlite3 raises OverflowError, not sqlite3.Error), and no row can hold it.
-SQLITE_MAX_INTEGER = 2**63 - 1
 MAX_OFFSET = SQLITE_MAX_INTEGER
-# Plain ASCII digits only: int() would also accept " 5", "+5", "1_000" or "٥".
-_UNSIGNED_INT = re.compile(r"[0-9]+")
 
 db_bp = Blueprint("db", __name__, url_prefix="/db")
 
@@ -72,21 +68,6 @@ def get_db_connection(path: Path | None = None) -> sqlite3.Connection:
     return connection
 
 
-def _parse_unsigned_int(raw: str, maximum: int) -> int | None:
-    """Return raw as an int if it is ASCII digits worth at most maximum, else None.
-
-    Leading zeros are dropped and the length checked before int(): Python refuses to
-    convert strings of more than 4300 digits, and its message must not reach clients.
-    """
-    if not _UNSIGNED_INT.fullmatch(raw):
-        return None
-    digits = raw.lstrip("0") or "0"
-    if len(digits) > len(str(maximum)):
-        return None
-    value = int(digits)
-    return value if value <= maximum else None
-
-
 def _paging_param(name: str, default: int, minimum: int, maximum: int) -> int:
     """Read an integer query parameter from minimum to maximum, or raise ValueError.
 
@@ -96,8 +77,8 @@ def _paging_param(name: str, default: int, minimum: int, maximum: int) -> int:
     raw = request.args.get(name)
     if raw is None:
         return default
-    value = _parse_unsigned_int(raw, maximum)
-    if value is None or value < minimum:
+    value = parse_unsigned_int(raw, maximum)
+    if value is None or not minimum <= value <= maximum:
         raise ValueError(
             f"Query parameter '{name}' must be an integer from {minimum} to {maximum}"
         )
