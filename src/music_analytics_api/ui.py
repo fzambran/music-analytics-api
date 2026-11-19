@@ -1,6 +1,7 @@
 """Blueprint serving /ui, an HTML form to try the API from the browser."""
 
 import re
+from typing import Literal, TypedDict
 
 from flask import Blueprint, current_app, render_template
 
@@ -8,12 +9,33 @@ from music_analytics_api.routes import MAX_QUERY_LENGTH
 
 ui_bp = Blueprint("ui", __name__, template_folder="templates")
 
+
+class Preset(TypedDict):
+    """A quick test case: the request it sends and the status code it gets."""
+
+    label: str  # Starts with the expected status code
+    rule: str  # Flask rule of a listed endpoint, e.g. "/artists/<int:artist_id>"
+    params: dict[str, str]  # Path and query parameter values
+    status: int
+
+
+class EndpointInfo(TypedDict):
+    """What the page's JavaScript needs to know about one API route."""
+
+    rule: str  # Flask rule, e.g. "/db/artists/<int:artist_id>/albums"
+    path: str  # Same path with {name} placeholders: "/db/artists/{artist_id}/albums"
+    path_params: list[str]
+    param_types: dict[str, str]  # Converter of each path parameter: "int", "string"...
+    query_params: list[str]
+    group: Literal["memory", "db"]
+
+
 # Query-string parameters each endpoint reads; path parameters come from the URL rule.
 QUERY_PARAMS: dict[str, list[str]] = {"api.search_artists": ["q"]}
 
 # Quick test cases shown as buttons. The label starts with the status code they get;
 # tests/test_ui.py sends each one and checks it.
-PRESETS: list[dict] = [
+PRESETS: list[Preset] = [
     {
         "label": "200 · Todos los artistas",
         "rule": "/artists",
@@ -70,26 +92,31 @@ PRESETS: list[dict] = [
     },
 ]
 
-_CONVERTER = re.compile(r"<(?:[^:<>]+:)?([^<>]+)>")  # <int:artist_id> -> artist_id
+# A rule variable: <artist_id>, <int:artist_id> or <int(min=1):artist_id>.
+# Group 1 is the converter name (absent means "string"), group 2 the parameter name.
+_RULE_VARIABLE = re.compile(r"<(?:([^:<>(]+)(?:\([^<>]*\))?:)?([^<>]+)>")
 
 
-def api_endpoints() -> list[dict]:
+def api_endpoints() -> list[EndpointInfo]:
     """Describe every GET route of the current app except /ui, in registration order.
 
     Each item has the Flask rule, a path template with {name} placeholders, its path
-    and query parameters, and its group: "db" for the /db Blueprint, else "memory".
+    parameters with their converter ("int", "string"...), its query parameters, and
+    its group: "db" for the /db Blueprint, else "memory".
     """
-    endpoints = []
+    endpoints: list[EndpointInfo] = []
     for rule in current_app.url_map.iter_rules():
         if rule.endpoint == "static" or rule.endpoint.startswith("ui."):
             continue
         if "GET" not in (rule.methods or set()):
             continue
+        variables = _RULE_VARIABLE.findall(rule.rule)
         endpoints.append(
             {
                 "rule": rule.rule,
-                "path": _CONVERTER.sub(r"{\1}", rule.rule),
-                "path_params": _CONVERTER.findall(rule.rule),
+                "path": _RULE_VARIABLE.sub(r"{\2}", rule.rule),
+                "path_params": [name for _, name in variables],
+                "param_types": {name: conv or "string" for conv, name in variables},
                 "query_params": QUERY_PARAMS.get(rule.endpoint, []),
                 "group": "db" if rule.endpoint.startswith("db.") else "memory",
             }
@@ -98,7 +125,7 @@ def api_endpoints() -> list[dict]:
 
 
 @ui_bp.route("/ui", methods=["GET"])
-def explorer():
+def explorer() -> str:
     """Render the API explorer: a request form and a response panel."""
     return render_template(
         "ui.html",
