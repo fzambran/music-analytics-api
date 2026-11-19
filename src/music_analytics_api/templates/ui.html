@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Explorador de la API</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1e1e1e; --muted: #5f6670; --border: #d5d9de;
+    --accent: #1971c2; --accent-soft: #d0ebff; --ok: #2b8a3e; --ok-soft: #d3f9d8;
+    --warn: #b35900; --warn-soft: #ffe8cc; --err: #c92a2a; --err-soft: #ffe3e3;
+    --local: #fff9db; --code: #f1f3f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16181c; --panel: #1f2228; --text: #e9ecef; --muted: #a0a7b0; --border: #393e46;
+      --accent: #74c0fc; --accent-soft: #1c3a57; --ok: #8ce99a; --ok-soft: #1f3d26;
+      --warn: #ffc078; --warn-soft: #4a3216; --err: #ffa8a8; --err-soft: #4d1f1f;
+      --local: #3a3517; --code: #2a2e35;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header { padding: 20px 24px 4px; }
+  h1 { margin: 0; font-size: 1.5rem; }
+  header p { margin: 4px 0 0; color: var(--muted); }
+  main {
+    display: grid; grid-template-columns: minmax(300px, 420px) minmax(0, 1fr);
+    gap: 20px; padding: 16px 24px 32px; align-items: start;
+  }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; padding: 16px; } }
+  section.panel {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px;
+    min-width: 0;
+  }
+  h2 { margin: 0 0 12px; font-size: 1.1rem; }
+  h3 { margin: 18px 0 8px; font-size: .95rem; }
+  label { display: block; font-weight: 600; margin: 12px 0 4px; }
+  .hint { color: var(--muted); font-size: .85rem; margin-top: 2px; }
+  .error-msg { color: var(--err); font-size: .85rem; margin-top: 2px; min-height: 1em; }
+  input, select, button {
+    font: inherit; color: inherit; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px;
+  }
+  input, select { width: 100%; }
+  input[aria-invalid="true"] { border-color: var(--err); }
+  input:focus-visible, select:focus-visible, button:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px;
+  }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--panel); font-weight: 600; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .check { display: flex; gap: 6px; align-items: center; font-weight: 400; }
+  .check input { width: auto; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85rem; }
+  .url {
+    display: block; background: var(--code); border-radius: 6px; padding: 8px;
+    overflow-wrap: anywhere; margin: 12px 0 10px;
+  }
+  .presets { display: flex; flex-wrap: wrap; gap: 6px; }
+  .presets button { font-size: .82rem; padding: 4px 8px; }
+  .presets button[data-status^="2"] { background: var(--ok-soft); }
+  .presets button[data-status^="4"] { background: var(--warn-soft); }
+  fieldset.future {
+    margin: 18px 0 0; border: 1px dashed var(--border); border-radius: 8px; padding: 8px 12px 12px;
+    color: var(--muted);
+  }
+  fieldset.future legend { padding: 0 4px; }
+  .badges { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-height: 32px; }
+  .badge { border-radius: 999px; padding: 3px 10px; font-size: .85rem; background: var(--code); }
+  .badge.status { font-weight: 700; }
+  .badge.ok { background: var(--ok-soft); color: var(--ok); }
+  .badge.warn { background: var(--warn-soft); color: var(--warn); }
+  .badge.err { background: var(--err-soft); color: var(--err); }
+  [role="tablist"] { display: flex; gap: 4px; margin: 14px 0 0; border-bottom: 1px solid var(--border); }
+  [role="tab"] { border: none; border-radius: 6px 6px 0 0; background: transparent; padding: 6px 14px; }
+  [role="tab"][aria-selected="true"] { background: var(--accent-soft); font-weight: 600; }
+  .filters {
+    background: var(--local); border-radius: 8px; padding: 4px 12px 12px; margin: 12px 0;
+    display: grid; grid-template-columns: 2fr 1.3fr 1fr auto; gap: 8px; align-items: end;
+  }
+  @media (max-width: 600px) { .filters { grid-template-columns: 1fr 1fr; } }
+  .filters label { font-size: .85rem; }
+  .filters .count { color: var(--muted); font-size: .85rem; padding-bottom: 8px; white-space: nowrap; }
+  .table-wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  th button { border: none; background: transparent; padding: 0; font-weight: 700; }
+  pre.raw {
+    background: var(--code); border-radius: 6px; padding: 12px; margin: 12px 0 0;
+    overflow: auto; max-height: 60vh; white-space: pre-wrap; overflow-wrap: anywhere;
+  }
+  .empty { color: var(--muted); padding: 12px 0; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Explorador de la API</h1>
+  <p>Prueba los endpoints de Music Analytics API desde el navegador. Todas las peticiones son <code>GET</code>.</p>
+</header>
+
+<main>
+  <section class="panel" aria-labelledby="request-title">
+    <h2 id="request-title">Petición</h2>
+    <form id="request-form" novalidate>
+      <label for="endpoint">Endpoint</label>
+      <select id="endpoint"></select>
+
+      <div id="params"></div>
+
+      <label class="check"><input type="checkbox" id="validate" checked> Validar antes de enviar</label>
+      <div class="hint">Desmárcalo para enviar valores inválidos y ver cómo responde la API.</div>
+
+      <code class="url" id="url-preview" aria-label="URL que se enviará"></code>
+      <div class="row">
+        <button type="submit" class="primary">Enviar</button>
+        <button type="button" id="copy-curl">Copiar curl</button>
+        <button type="button" id="reset">Limpiar</button>
+        <span class="hint" id="copy-msg" role="status"></span>
+      </div>
+    </form>
+
+    <h3>Casos de prueba rápidos</h3>
+    <div class="presets" id="presets"></div>
+
+    <fieldset class="future" disabled>
+      <legend>Futuro: requiere cambios en la API</legend>
+      <div class="hint"><code>calculate_album_stats</code> ya acepta estos valores, pero <code>/stats/albums</code> no los recibe.</div>
+      <label for="min-tracks">min_tracks</label>
+      <input id="min-tracks" type="number" placeholder="5">
+      <label for="multiplier">multiplier</label>
+      <input id="multiplier" type="number" placeholder="1.2">
+    </fieldset>
+  </section>
+
+  <section class="panel" aria-labelledby="response-title">
+    <h2 id="response-title">Respuesta</h2>
+    <div class="badges" id="badges" aria-live="polite">
+      <span class="badge">Sin peticiones todavía</span>
+    </div>
+
+    <div role="tablist" aria-label="Vista de la respuesta">
+      <button type="button" role="tab" id="tab-table" aria-controls="view-table" aria-selected="true">Tabla</button>
+      <button type="button" role="tab" id="tab-raw" aria-controls="view-raw" aria-selected="false" tabindex="-1">JSON</button>
+    </div>
+
+    <div role="tabpanel" id="view-table" aria-labelledby="tab-table">
+      <div class="filters" aria-label="Filtros locales">
+        <div>
+          <label for="search">Buscar en los resultados</label>
+          <input id="search" type="search" placeholder="texto…">
+        </div>
+        <div>
+          <label for="num-col">Columna numérica</label>
+          <select id="num-col"><option value="">(ninguna)</option></select>
+        </div>
+        <div>
+          <label for="num-min">≥ valor</label>
+          <input id="num-min" type="number" step="any">
+        </div>
+        <div class="count" id="row-count"></div>
+      </div>
+      <div class="hint">Los filtros y el orden (clic en un encabezado) se aplican en el navegador, no en la API.</div>
+      <div class="table-wrap" id="table-wrap"><p class="empty">Envía una petición para ver los resultados.</p></div>
+    </div>
+
+    <div role="tabpanel" id="view-raw" aria-labelledby="tab-raw" hidden>
+      <pre class="raw" id="raw"></pre>
+    </div>
+  </section>
+</main>
+
+<script id="endpoints-data" type="application/json">{{ endpoints|tojson }}</script>
+<script id="presets-data" type="application/json">{{ presets|tojson }}</script>
+<script>
+(() => {
+  "use strict";
+  const ENDPOINTS = JSON.parse(document.getElementById("endpoints-data").textContent);
+  const PRESETS = JSON.parse(document.getElementById("presets-data").textContent);
+  const MAX_QUERY_LENGTH = 100;
+  const FIELD_HELP = {
+    artist_id: "Entero. Memoria: 1–5 · Chinook: 1–275.",
+    q: "Texto a buscar en el nombre del artista (obligatorio, máximo 100 caracteres).",
+  };
+  const $ = (id) => document.getElementById(id);
+  const form = $("request-form"), select = $("endpoint"), paramsBox = $("params");
+  const state = { rows: [], columns: [], sort: { col: null, dir: 1 } };
+
+  const displayRule = (rule) => rule.replace(/<(?:[^:<>]+:)?([^<>]+)>/g, "<$1>");
+  const current = () => ENDPOINTS[Number(select.value)];
+  const fieldsOf = (ep) => [...ep.path_params, ...ep.query_params];
+
+  // --- Endpoint selector and dynamic parameters -------------------------------
+  const groups = { memory: "Datos en memoria", db: "Chinook (/db)" };
+  for (const [key, title] of Object.entries(groups)) {
+    const optgroup = document.createElement("optgroup");
+    optgroup.label = title;
+    ENDPOINTS.forEach((ep, i) => {
+      if (ep.group !== key) return;
+      optgroup.append(new Option("GET " + displayRule(ep.rule), String(i)));
+    });
+    if (optgroup.children.length) select.append(optgroup);
+  }
+
+  function renderParams(values = {}) {
+    paramsBox.replaceChildren();
+    for (const name of fieldsOf(current())) {
+      const label = document.createElement("label");
+      label.htmlFor = "param-" + name;
+      label.textContent = name;
+      const input = document.createElement("input");
+      input.id = "param-" + name;
+      input.name = name;
+      input.autocomplete = "off";
+      if (name === "artist_id") { input.inputMode = "numeric"; input.placeholder = "1"; }
+      input.value = values[name] ?? "";
+      const help = document.createElement("div");
+      help.className = "hint";
+      help.id = "help-" + name;
+      const error = document.createElement("div");
+      error.className = "error-msg";
+      error.id = "error-" + name;
+      input.setAttribute("aria-describedby", help.id + " " + error.id);
+      input.addEventListener("input", updatePreview);
+      paramsBox.append(label, input, help, error);
+    }
+    updatePreview();
+  }
+
+  function values() {
+    const result = {};
+    for (const name of fieldsOf(current())) result[name] = $("param-" + name).value;
+    return result;
+  }
+
+  function buildUrl(ep, vals) {
+    let path = ep.path;
+    for (const name of ep.path_params) {
+      path = path.replace("{" + name + "}", encodeURIComponent(vals[name] ?? ""));
+    }
+    if (!ep.query_params.length) return path;
+    const query = new URLSearchParams();
+    for (const name of ep.query_params) query.set(name, vals[name] ?? "");
+    return path + "?" + query.toString();
+  }
+
+  function validationErrors(vals) {
+    const errors = {};
+    for (const [name, value] of Object.entries(vals)) {
+      if (name === "artist_id" && !/^\d+$/.test(value.trim())) {
+        errors[name] = "Debe ser un entero mayor o igual que 0.";
+      } else if (name === "q" && !value.trim()) {
+        errors[name] = "q es obligatorio.";
+      } else if (name === "q" && value.trim().length > MAX_QUERY_LENGTH) {
+        errors[name] = `Máximo ${MAX_QUERY_LENGTH} caracteres.`;
+      }
+    }
+    return errors;
+  }
+
+  function showErrors(errors) {
+    for (const name of fieldsOf(current())) {
+      $("error-" + name).textContent = errors[name] || "";
+      $("param-" + name).setAttribute("aria-invalid", errors[name] ? "true" : "false");
+    }
+  }
+
+  function updatePreview() {
+    const vals = values();
+    for (const name of fieldsOf(current())) {
+      const counter = name === "q" ? ` (${vals.q.trim().length}/${MAX_QUERY_LENGTH})` : "";
+      $("help-" + name).textContent = FIELD_HELP[name] ? FIELD_HELP[name] + counter : counter;
+    }
+    $("url-preview").textContent = "GET " + buildUrl(current(), vals);
+    showErrors({});
+  }
+
+  select.addEventListener("change", () => renderParams());
+
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const vals = values();
+    if ($("validate").checked) {
+      const errors = validationErrors(vals);
+      showErrors(errors);
+      const firstInvalid = Object.keys(errors)[0];
+      if (firstInvalid) { $("param-" + firstInvalid).focus(); return; }
+    }
+    send(buildUrl(current(), vals));
+  });
+
+  $("reset").addEventListener("click", () => {
+    select.selectedIndex = 0;
+    renderParams();
+    showResponse(null);
+  });
+
+  $("copy-curl").addEventListener("click", async () => {
+    const url = location.origin + buildUrl(current(), values());
+    const command = "curl -i '" + url.replaceAll("'", "'\\''") + "'";
+    try {
+      await navigator.clipboard.writeText(command);
+      $("copy-msg").textContent = "Copiado";
+    } catch {
+      window.prompt("Copia el comando:", command);
+    }
+    setTimeout(() => { $("copy-msg").textContent = ""; }, 2000);
+  });
+
+  // --- Quick test cases ----------------------------------------------------
+  for (const preset of PRESETS) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = preset.label;
+    button.dataset.status = String(preset.status);
+    button.addEventListener("click", () => {
+      select.value = String(ENDPOINTS.findIndex((ep) => ep.rule === preset.rule));
+      renderParams(preset.params);
+      send(buildUrl(current(), preset.params));  // Presets skip validation on purpose.
+    });
+    $("presets").append(button);
+  }
+
+  // --- Sending and showing the response ------------------------------------
+  async function send(url) {
+    const badges = $("badges");
+    badges.replaceChildren(badge("Enviando…"));
+    const started = performance.now();
+    try {
+      const response = await fetch(url, { headers: { Accept: "application/json" } });
+      const body = await response.text();
+      const elapsed = Math.round(performance.now() - started);
+      const contentType = response.headers.get("Content-Type") || "";
+      let json, isJson = false;
+      if (contentType.includes("json")) {
+        try { json = JSON.parse(body); isJson = true; } catch { /* shown as text */ }
+      }
+      showResponse({ url, status: response.status, statusText: response.statusText,
+                     contentType, elapsed, body, json, isJson });
+    } catch (error) {
+      badges.replaceChildren(badge("Error de red", "err"), badge(String(error.message || error)));
+      setRows([], []);
+      $("raw").textContent = "";
+    }
+  }
+
+  function badge(text, kind = "") {
+    const span = document.createElement("span");
+    span.className = "badge" + (kind ? " " + kind : "");
+    span.textContent = text;
+    return span;
+  }
+
+  function showResponse(result) {
+    const badges = $("badges");
+    if (!result) {
+      badges.replaceChildren(badge("Sin peticiones todavía"));
+      $("raw").textContent = "";
+      setRows([], [], "Envía una petición para ver los resultados.");
+      return;
+    }
+    const kind = result.status < 300 ? "ok" : result.status < 500 ? "warn" : "err";
+    const status = badge(`${result.status} ${result.statusText}`.trim(), kind);
+    status.classList.add("status");
+    const count = !result.isJson ? "—"
+      : Array.isArray(result.json) ? `${result.json.length} resultado${result.json.length === 1 ? "" : "s"}`
+      : "1 objeto";
+    badges.replaceChildren(status, badge(result.contentType || "sin Content-Type"),
+                           badge(`${result.elapsed} ms`), badge(count), badge("GET " + result.url));
+
+    $("raw").textContent = result.isJson ? JSON.stringify(result.json, null, 2) : result.body;
+    if (!result.isJson) {
+      setRows([], [], "La respuesta no es JSON: revísala en la pestaña JSON.");
+      return;
+    }
+    const items = Array.isArray(result.json) ? result.json : [result.json];
+    const rows = items.map((item) =>
+      item !== null && typeof item === "object" && !Array.isArray(item) ? item : { valor: item });
+    const columns = [];
+    for (const row of rows) for (const key of Object.keys(row)) if (!columns.includes(key)) columns.push(key);
+    // Flask sorts JSON keys alphabetically; show IDs first, then the name or title.
+    const rank = (col) => (col.endsWith("_id") ? 0 : col === "name" || col === "title" ? 1 : 2);
+    columns.sort((a, b) => rank(a) - rank(b));
+    setRows(rows, columns, "La respuesta es una lista vacía.");
+  }
+
+  // --- Local filters, sorting and the table --------------------------------
+  function setRows(rows, columns, emptyText = "Sin resultados.") {
+    state.rows = rows;
+    state.columns = columns;
+    state.emptyText = emptyText;
+    state.sort = { col: null, dir: 1 };
+    const numeric = columns.filter((col) =>
+      rows.some((row) => typeof row[col] === "number") &&
+      rows.every((row) => row[col] == null || typeof row[col] === "number"));
+    const numCol = $("num-col");
+    const previous = numCol.value;
+    numCol.replaceChildren(new Option("(ninguna)", ""), ...numeric.map((col) => new Option(col, col)));
+    numCol.value = numeric.includes(previous) ? previous : "";
+    renderTable();
+  }
+
+  const cellText = (value) =>
+    value === null || value === undefined ? "" : typeof value === "object" ? JSON.stringify(value) : String(value);
+
+  function visibleRows() {
+    const needle = $("search").value.trim().toLocaleLowerCase("es");
+    const numCol = $("num-col").value;
+    const minText = $("num-min").value;
+    let rows = state.rows.filter((row) =>
+      !needle || state.columns.some((col) => cellText(row[col]).toLocaleLowerCase("es").includes(needle)));
+    if (numCol && minText !== "") rows = rows.filter((row) => typeof row[numCol] === "number" && row[numCol] >= Number(minText));
+    const { col, dir } = state.sort;
+    if (col) {
+      rows = [...rows].sort((a, b) => {
+        const x = a[col], y = b[col];
+        if (typeof x === "number" && typeof y === "number") return (x - y) * dir;
+        return cellText(x).localeCompare(cellText(y), "es", { numeric: true }) * dir;
+      });
+    }
+    return rows;
+  }
+
+  function renderTable() {
+    const wrap = $("table-wrap");
+    const rows = visibleRows();
+    $("row-count").textContent = state.columns.length ? `${rows.length} de ${state.rows.length} filas` : "";
+    if (!state.rows.length) {
+      const p = document.createElement("p");
+      p.className = "empty";
+      p.textContent = state.emptyText;
+      wrap.replaceChildren(p);
+      return;
+    }
+    const table = document.createElement("table");
+    const headRow = table.createTHead().insertRow();
+    for (const col of state.columns) {
+      const th = document.createElement("th");
+      th.scope = "col";
+      const sorted = state.sort.col === col;
+      if (state.rows.every((row) => row[col] == null || typeof row[col] === "number")) th.className = "num";
+      th.setAttribute("aria-sort", sorted ? (state.sort.dir === 1 ? "ascending" : "descending") : "none");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = col + (sorted ? (state.sort.dir === 1 ? " ▲" : " ▼") : "");
+      button.addEventListener("click", () => {
+        state.sort = { col, dir: sorted ? -state.sort.dir : 1 };
+        renderTable();
+      });
+      th.append(button);
+      headRow.append(th);
+    }
+    const body = table.createTBody();
+    for (const row of rows) {
+      const tr = body.insertRow();
+      for (const col of state.columns) {
+        const td = tr.insertCell();
+        td.textContent = cellText(row[col]);
+        if (typeof row[col] === "number") td.className = "num";
+      }
+    }
+    wrap.replaceChildren(table);
+  }
+
+  for (const id of ["search", "num-min"]) $(id).addEventListener("input", renderTable);
+  $("num-col").addEventListener("change", renderTable);
+
+  // --- Tabs ------------------------------------------------------------------
+  const tabs = [$("tab-table"), $("tab-raw")];
+  function selectTab(tab) {
+    for (const t of tabs) {
+      const selected = t === tab;
+      t.setAttribute("aria-selected", String(selected));
+      t.tabIndex = selected ? 0 : -1;
+      $(t.getAttribute("aria-controls")).hidden = !selected;
+    }
+    tab.focus();
+  }
+  tabs.forEach((tab, i) => {
+    tab.addEventListener("click", () => selectTab(tab));
+    tab.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowRight" || event.key === "ArrowLeft") selectTab(tabs[(i + 1) % tabs.length]);
+    });
+  });
+
+  renderParams();
+})();
+</script>
+</body>
+</html>

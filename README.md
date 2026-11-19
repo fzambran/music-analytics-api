@@ -35,11 +35,22 @@ Variables de entorno:
 | `SECRET_KEY` | Clave de sesión. Si no está definida, se genera una clave aleatoria cada vez que arranca el proceso. |
 | `CHINOOK_DB_PATH` | Ruta de la base Chinook que usan los endpoints `/db` y el reporte. Por defecto, `data/chinook.db` del repositorio. Acepta rutas relativas al directorio actual y `~`. Es obligatoria si instalas el paquete como wheel, porque la base no viene incluida. |
 
+### Explorador en el navegador
+
+Con la API en marcha, abre `http://127.0.0.1:5000/ui` (o el puerto que uses) para probar los endpoints con un formulario:
+
+- Eliges el endpoint y completas sus parámetros (`artist_id`, `q`). El formulario muestra la URL que se enviará y puede copiarla como comando `curl`.
+- "Validar antes de enviar" revisa `q` y `artist_id` en el navegador; desmárcalo para mandar valores inválidos y ver cómo responde la API.
+- Los casos de prueba rápidos envían peticiones que responden 200, 400 y 404, incluido un 404 en HTML de Flask.
+- La respuesta muestra el código de estado, el `Content-Type`, el tiempo y el número de resultados, como tabla o como JSON. La búsqueda, el filtro por columna numérica y el orden por columna se aplican en el navegador sobre la respuesta recibida, no son parámetros de la API.
+
+La página usa la misma API, así que no necesita CORS ni dependencias adicionales.
+
 Las sesiones se guardan en la carpeta de instancia de Flask (`src/instance/flask_session/` al trabajar desde el repositorio), no en el directorio desde donde se inicia la API.
 
 ## Endpoints
 
-Todos los endpoints aceptan solo `GET`. Las respuestas y los errores de la API (400, 404 y los 500 de `/db`, con la forma `{"error": "..."}`) son JSON. Los errores que genera Flask por su cuenta siguen siendo páginas HTML: un 404 por una ruta que no existe y un 405 por otro método.
+Todos los endpoints aceptan solo `GET`. `/ui` es la página HTML del explorador; no es parte de la API. Las respuestas y los errores de la API (400, 404 y los 500 de `/db`, con la forma `{"error": "..."}`) son JSON. Los errores que genera Flask por su cuenta siguen siendo páginas HTML: un 404 por una ruta que no existe y un 405 por otro método.
 
 ### Datos en memoria
 
@@ -153,6 +164,7 @@ music-analytics-api/
 | `routes.py` | Blueprint con los endpoints que usan los datos en memoria. |
 | `db_routes.py` | Blueprint `/db` con los endpoints que consultan `data/chinook.db` y el modelo Pydantic `AlbumOut` que valida sus respuestas. |
 | `analytics.py` | Funciones puras de estadísticas usadas por `/stats/*`. |
+| `ui.py` y `templates/ui.html` | Blueprint `/ui`: el explorador de la API en el navegador. |
 | `reporter.py` | CLI que genera estadísticas por artista desde `data/chinook.db` en JSON o CSV. |
 
 Las pruebas de `tests/` siguen el nombre del módulo que prueban (`test_routes.py`, `test_db_routes.py`, `test_reporter.py`, ...).
