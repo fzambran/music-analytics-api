@@ -121,6 +121,14 @@ def test_ui_paginated_alternatives_are_listed_paginated_routes(client):
         assert {"limit", "offset"} <= set(endpoints[rule]["query_params"])
 
 
+def test_ui_tables_point_to_registered_routes(app):
+    """A renamed view or rule must not silently drop its parameters or note."""
+    rules = {rule.rule for rule in app.url_map.iter_rules()}
+
+    assert set(ui.QUERY_PARAMS) <= set(app.view_functions)
+    assert set(ui.PAGINATED_ALTERNATIVES) <= rules
+
+
 def test_api_endpoints_reads_each_converter_from_the_rule():
     """A new route gets its parameter types without changes to ui.py or the page."""
     app = Flask("converters")

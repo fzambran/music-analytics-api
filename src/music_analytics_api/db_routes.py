@@ -19,6 +19,7 @@ CHINOOK_DB_PATH = (
 
 DEFAULT_PAGE_SIZE = 20
 MAX_PAGE_SIZE = 100
+MAX_OFFSET = 2**63 - 1  # SQLite's largest integer: a bigger value cannot be bound
 # Plain ASCII digits only: int() would also accept " 5", "+5", "1_000" or "٥".
 _UNSIGNED_INT = re.compile(r"[0-9]+")
 
@@ -68,23 +69,34 @@ def get_db_connection(path: Path | None = None) -> sqlite3.Connection:
     return connection
 
 
-def _paging_param(name: str, default: int, minimum: int, maximum: int | None) -> int:
-    """Read a non-negative integer query parameter, or raise ValueError with the message.
+def _parse_unsigned_int(raw: str, maximum: int) -> int | None:
+    """Return raw as an int if it is ASCII digits worth at most maximum, else None.
 
-    A missing parameter gives `default`; an empty or non-numeric one is an error.
+    Leading zeros are dropped and the length checked before int(): Python refuses to
+    convert strings of more than 4300 digits, and its message must not reach clients.
+    """
+    if not _UNSIGNED_INT.fullmatch(raw):
+        return None
+    digits = raw.lstrip("0") or "0"
+    if len(digits) > len(str(maximum)):
+        return None
+    value = int(digits)
+    return value if value <= maximum else None
+
+
+def _paging_param(name: str, default: int, minimum: int, maximum: int) -> int:
+    """Read an integer query parameter from minimum to maximum, or raise ValueError.
+
+    A missing parameter gives `default`; an empty, non-numeric or out-of-range one
+    raises ValueError with the message for the client.
     """
     raw = request.args.get(name)
     if raw is None:
         return default
-    value = int(raw) if _UNSIGNED_INT.fullmatch(raw) else None
-    if maximum is not None:
-        if value is None or not minimum <= value <= maximum:
-            raise ValueError(
-                f"Query parameter '{name}' must be an integer from {minimum} to {maximum}"
-            )
-    elif value is None or value < minimum:
+    value = _parse_unsigned_int(raw, maximum)
+    if value is None or value < minimum:
         raise ValueError(
-            f"Query parameter '{name}' must be an integer of at least {minimum}"
+            f"Query parameter '{name}' must be an integer from {minimum} to {maximum}"
         )
     return value
 
@@ -94,22 +106,20 @@ def list_artists():
     """Return one page of chinook.db artists, ordered by ArtistId.
 
     Query parameters: `limit` (1 to MAX_PAGE_SIZE, default DEFAULT_PAGE_SIZE) and
-    `offset` (at least 0, default 0). Responds `{"items", "total", "limit", "offset"}`;
+    `offset` (0 to MAX_OFFSET, default 0). Responds `{"items", "total", "limit", "offset"}`;
     an offset past the last artist gives an empty `items`. Invalid values answer 400.
     """
     try:
         limit = _paging_param("limit", DEFAULT_PAGE_SIZE, 1, MAX_PAGE_SIZE)
-        offset = _paging_param("offset", 0, 0, None)
+        offset = _paging_param("offset", 0, 0, MAX_OFFSET)
     except ValueError as error:
         return jsonify({"error": str(error)}), 400
 
     with closing(get_db_connection()) as connection:
         total = connection.execute("SELECT COUNT(*) FROM Artist").fetchone()[0]
-        # Clamped to total: an offset beyond SQLite's 64-bit integers cannot be bound,
-        # and any offset >= total returns no rows anyway.
         rows = connection.execute(
             "SELECT ArtistId, Name FROM Artist ORDER BY ArtistId LIMIT ? OFFSET ?",
-            (limit, min(offset, total)),
+            (limit, offset),
         ).fetchall()
 
     artists = [ArtistOut.model_validate(dict(row)) for row in rows]

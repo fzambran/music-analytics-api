@@ -151,3 +151,34 @@ def test_list_artists_database_error_answers_json_500(monkeypatch, api_client):
     assert response.status_code == 500
     assert response.get_json() == {"error": "Database unavailable"}
     connection.close.assert_called_once()
+
+
+def _fake_artists_connection(rows):
+    """Fake connection for /db/artists: first execute() is COUNT(*), second the page."""
+    connection = MagicMock()
+    count_cursor, rows_cursor = MagicMock(), MagicMock()
+    count_cursor.fetchone.return_value = (len(rows),)
+    rows_cursor.fetchall.return_value = rows
+    connection.execute.side_effect = [count_cursor, rows_cursor]
+    return connection
+
+
+def test_list_artists_answers_a_null_name(monkeypatch, api_client):
+    connection = _fake_artists_connection([{"ArtistId": 1, "Name": None}])
+    monkeypatch.setattr(db_routes, "get_db_connection", lambda: connection)
+
+    response = api_client.get("/db/artists")
+
+    assert response.status_code == 200
+    assert response.get_json()["items"] == [{"artist_id": 1, "name": None}]
+
+
+def test_list_artists_invalid_row_answers_json_500(monkeypatch, api_client):
+    connection = _fake_artists_connection([{"ArtistId": "x", "Name": "AC/DC"}])
+    monkeypatch.setattr(db_routes, "get_db_connection", lambda: connection)
+
+    response = api_client.get("/db/artists")
+
+    assert response.status_code == 500
+    assert response.get_json() == {"error": "Invalid data in database"}
+    connection.close.assert_called_once()
