@@ -266,14 +266,16 @@
     updatePreview();
   }
 
-  // Parameters are trimmed here, once, so validation, preview, curl and the request
-  // all use the same value; q is sent as typed because the API strips it itself.
+  // Path parameters are trimmed here, once, so validation, preview, curl and the request
+  // all use the same value. Query parameters are sent as typed: the API strips q itself
+  // and rejects " 5" for limit/offset, which validation reports and an unchecked
+  // "Validar" box must let through to show the API's 400.
   function values() {
     const ep = current();
     const result = {};
     for (const name of fieldsOf(ep)) {
       const raw = $("param-" + name).value;
-      result[name] = name === "q" ? raw : raw.trim();
+      result[name] = ep.path_params.includes(name) ? raw.trim() : raw;
     }
     return result;
   }

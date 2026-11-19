@@ -6,7 +6,7 @@
 
 ## Contexto
 
-La API Flask solo expone `GET /db/artists/<id>/albums` desde `chinook.db`.
+Cuando se escribió este plan, la API Flask solo exponía `GET /db/artists/<id>/albums` desde `chinook.db` (después se agregó `GET /db/artists`, paginado).
 `reporter.py` cubre otra necesidad: un reporte offline con una fila por artista (álbumes, pistas, duración, géneros, ingresos reales y unidades vendidas), exportable a JSON o CSV.
 Se usa como módulo importable y como CLI.
 No es un endpoint Flask: no modifica `routes.py` y de `db_routes.py` solo reutiliza `get_db_connection()`.

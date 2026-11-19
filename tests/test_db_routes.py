@@ -15,8 +15,10 @@ from music_analytics_api.app import create_app
 from music_analytics_api.db_routes import (
     CHINOOK_DB_PATH,
     DEFAULT_PAGE_SIZE,
+    MAX_OFFSET,
     MAX_PAGE_SIZE,
     AlbumOut,
+    ArtistOut,
     get_db_connection,
 )
 
@@ -137,6 +139,29 @@ def test_db_artist_albums_match_database_for_every_artist(client):
         assert response.get_json() == expected, artist_id
 
 
+def test_artist_out_maps_chinook_columns_to_api_keys():
+    artist = ArtistOut.model_validate({"ArtistId": 1, "Name": "AC/DC"})
+    assert artist.model_dump() == {"artist_id": 1, "name": "AC/DC"}
+
+
+def test_artist_out_accepts_a_null_name():
+    """Artist.Name is nullable in Chinook; a NULL name is data, not an error."""
+    assert ArtistOut.model_validate({"ArtistId": 1, "Name": None}).name is None
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        {"ArtistId": "x", "Name": "AC/DC"},
+        {"ArtistId": 1, "Name": 123},
+        {"Name": "AC/DC"},
+    ],
+)
+def test_artist_out_rejects_invalid_rows(row):
+    with pytest.raises(ValidationError):
+        ArtistOut.model_validate(row)
+
+
 def test_album_out_maps_chinook_columns_to_api_keys():
     album = AlbumOut.model_validate({"AlbumId": 5, "Title": "Big Ones", "ArtistId": 3})
     assert album.model_dump() == {"album_id": 5, "title": "Big Ones", "artist_id": 3}
@@ -228,6 +253,12 @@ def test_missing_database_answers_json_500(tmp_path):
 # --- GET /db/artists (paginated) --------------------------------------------
 
 
+LIMIT_ERROR = "Query parameter 'limit' must be an integer from 1 to 100"
+OFFSET_ERROR = (
+    "Query parameter 'offset' must be an integer from 0 to 9223372036854775807"
+)
+
+
 def _chinook_artists() -> list[dict]:
     """Every artist in chinook.db as the API returns it, ordered by ArtistId."""
     uri = f"{CHINOOK_DB_PATH.as_uri()}?mode=ro"
@@ -277,9 +308,9 @@ def test_db_artists_last_partial_page(client):
     assert (body["total"], body["limit"], body["offset"]) == (275, 20, 260)
 
 
-@pytest.mark.parametrize("offset", ["275", "1000", "99999999999999999999999"])
+@pytest.mark.parametrize("offset", ["275", "1000", str(MAX_OFFSET)])
 def test_db_artists_offset_past_the_end_is_an_empty_page(client, offset):
-    """Past the last artist there is nothing left, even beyond SQLite's integers."""
+    """Past the last artist there is nothing left, up to SQLite's largest integer."""
     response = client.get("/db/artists", query_string={"offset": offset})
 
     assert response.status_code == 200
@@ -299,17 +330,22 @@ def test_db_artists_accepts_limit_bounds(client, limit):
 @pytest.mark.parametrize(
     ("params", "message"),
     [
-        ({"limit": "0"}, "Query parameter 'limit' must be an integer from 1 to 100"),
-        ({"limit": "101"}, "Query parameter 'limit' must be an integer from 1 to 100"),
-        ({"limit": "abc"}, "Query parameter 'limit' must be an integer from 1 to 100"),
-        ({"limit": ""}, "Query parameter 'limit' must be an integer from 1 to 100"),
-        ({"limit": "-5"}, "Query parameter 'limit' must be an integer from 1 to 100"),
-        ({"limit": "2.5"}, "Query parameter 'limit' must be an integer from 1 to 100"),
-        ({"offset": "-1"}, "Query parameter 'offset' must be an integer of at least 0"),
-        ({"offset": "x"}, "Query parameter 'offset' must be an integer of at least 0"),
-        ({"offset": " 5"}, "Query parameter 'offset' must be an integer of at least 0"),
-        ({"offset": "+5"}, "Query parameter 'offset' must be an integer of at least 0"),
-        ({"offset": "٥"}, "Query parameter 'offset' must be an integer of at least 0"),
+        ({"limit": "0"}, LIMIT_ERROR),
+        ({"limit": "101"}, LIMIT_ERROR),
+        ({"limit": "abc"}, LIMIT_ERROR),
+        ({"limit": ""}, LIMIT_ERROR),
+        ({"limit": "-5"}, LIMIT_ERROR),
+        ({"limit": "2.5"}, LIMIT_ERROR),
+        ({"offset": "-1"}, OFFSET_ERROR),
+        ({"offset": "x"}, OFFSET_ERROR),
+        ({"offset": " 5"}, OFFSET_ERROR),
+        ({"offset": "+5"}, OFFSET_ERROR),
+        ({"offset": "٥"}, OFFSET_ERROR),
+        ({"offset": str(MAX_OFFSET + 1)}, OFFSET_ERROR),
+        ({"offset": "99999999999999999999999"}, OFFSET_ERROR),
+        # Past Python's 4300-digit int() limit: the message stays the API's own.
+        ({"offset": "9" * 5000}, OFFSET_ERROR),
+        ({"limit": "1" * 5000}, LIMIT_ERROR),
     ],
 )
 def test_db_artists_rejects_invalid_paging_params(client, params, message):
@@ -317,6 +353,25 @@ def test_db_artists_rejects_invalid_paging_params(client, params, message):
 
     assert response.status_code == 400
     assert response.get_json() == {"error": message}
+
+
+@pytest.mark.parametrize(
+    ("params", "limit", "offset"),
+    [
+        ({"limit": "005"}, 5, 0),
+        ({"limit": "0" * 5000 + "5"}, 5, 0),
+        ({"offset": "0" * 5000}, 20, 0),
+        ({"offset": "0" * 5000 + "40"}, 20, 40),
+    ],
+)
+def test_db_artists_ignores_leading_zeros(client, params, limit, offset):
+    """Leading zeros do not change the value, however many there are."""
+    response = client.get("/db/artists", query_string=params)
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert (body["limit"], body["offset"]) == (limit, offset)
+    assert body["items"][0]["artist_id"] == offset + 1
 
 
 def test_db_artists_rejects_post(client):
