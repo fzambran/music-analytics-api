@@ -219,7 +219,8 @@ def test_url_for_builds_int_routes_like_werkzeug(value, expected):
     app = create_app()
     with app.test_request_context():
         assert url_for("api.get_artist", artist_id=value) == f"/artists/{expected}"
-        assert app.test_client().get(f"/artists/{expected}").status_code in (200, 404)
+        # The built URL must route: artists 1, 3 and 5 exist, so anything but 200 fails.
+        assert app.test_client().get(f"/artists/{expected}").status_code == 200
 
 
 def test_ascii_int_converter_keeps_werkzeug_options():
