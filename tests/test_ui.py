@@ -97,6 +97,30 @@ def test_ui_endpoint_parameters_match_the_routes(client):
     assert endpoints["/artists"]["group"] == "memory"
 
 
+def test_ui_points_unpaginated_artists_to_the_paginated_route(client):
+    """/artists returns only the 5 sample artists; the page suggests /db/artists."""
+    html = client.get("/ui").get_data(as_text=True)
+    endpoints = {e["rule"]: e for e in _page_data(html, "endpoints-data")}
+
+    assert endpoints["/artists"]["paginated_alternative"] == "/db/artists"
+    assert endpoints["/db/artists"]["paginated_alternative"] is None
+
+
+def test_ui_paginated_alternatives_are_listed_paginated_routes(client):
+    """Every suggested route exists in the page and takes limit and offset."""
+    html = client.get("/ui").get_data(as_text=True)
+    endpoints = {e["rule"]: e for e in _page_data(html, "endpoints-data")}
+
+    alternatives = {
+        e["paginated_alternative"]
+        for e in endpoints.values()
+        if e["paginated_alternative"]
+    }
+    assert alternatives
+    for rule in alternatives:
+        assert {"limit", "offset"} <= set(endpoints[rule]["query_params"])
+
+
 def test_api_endpoints_reads_each_converter_from_the_rule():
     """A new route gets its parameter types without changes to ui.py or the page."""
     app = Flask("converters")
@@ -118,6 +142,7 @@ def test_api_endpoints_reads_each_converter_from_the_rule():
             "param_types": {"album_id": "int", "score": "float", "name": "string"},
             "query_params": [],
             "group": "memory",
+            "paginated_alternative": None,
         }
     ]
 
