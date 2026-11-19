@@ -86,6 +86,10 @@
   .filters label { font-size: .85rem; }
   .filters .count { color: var(--muted); font-size: .85rem; padding-bottom: 8px; white-space: nowrap; }
   .pager { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 10px 0 4px; }
+  .page-note {
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+    background: var(--accent-soft); border-radius: 8px; padding: 8px 12px; margin: 10px 0 4px;
+  }
   .pager button:disabled { opacity: .45; cursor: default; }
   .table-wrap { overflow-x: auto; }
   table { border-collapse: collapse; width: 100%; font-size: .9rem; }
@@ -173,6 +177,10 @@
         <span id="page-info" role="status"></span>
         <button type="button" id="page-next">Siguiente →</button>
       </nav>
+      <p class="page-note" id="page-note" role="note" hidden>
+        <span id="page-note-text"></span>
+        <button type="button" id="page-note-go"></button>
+      </p>
       <div class="table-wrap" id="table-wrap"><p class="empty">Envía una petición para ver los resultados.</p></div>
     </div>
 
@@ -410,6 +418,7 @@
       if (controller !== inFlight) return;  // Aborted by a newer request or by Limpiar.
       badges.replaceChildren(badge("Error de red", "err"), badge(String(error.message || error)));
       showPager(null);
+      showPageNote(null);
       setRows([], []);
       $("raw").textContent = "";
     }
@@ -426,6 +435,7 @@
     const badges = $("badges");
     const page = result && result.isJson ? pageOf(result.json) : null;
     showPager(page && { ...page, origin: result.origin });
+    showPageNote(result);
     if (!result) {
       badges.replaceChildren(badge("Sin peticiones todavía"));
       $("raw").textContent = "";
@@ -457,6 +467,28 @@
     columns.sort((a, b) => rank(a) - rank(b));
     setRows(rows, columns, page ? "Esta página no tiene resultados." : "La respuesta es una lista vacía.");
   }
+
+  // --- Note on unpaginated samples -------------------------------------------
+  // A 200 list from a route with a paginated alternative (/artists -> /db/artists)
+  // says it is complete but small, and offers to switch to the paginated route.
+  function showPageNote(result) {
+    const ep = result && ENDPOINTS[Number(result.origin.endpoint)];
+    const target = ep && ep.paginated_alternative;
+    const show = Boolean(target) && result.status === 200 && Array.isArray(result.json);
+    $("page-note").hidden = !show;
+    if (!show) return;
+    $("page-note-text").textContent =
+      `Esta respuesta no está paginada: ${displayRule(ep.rule)} devuelve todos sus datos de ejemplo ` +
+      `(${result.json.length}). Para recorrer todos los artistas por páginas, usa ${target}.`;
+    const button = $("page-note-go");
+    button.textContent = `Ir a ${target}`;
+    button.dataset.rule = target;
+  }
+  $("page-note-go").addEventListener("click", (event) => {
+    select.value = String(ENDPOINTS.findIndex((ep) => ep.rule === event.currentTarget.dataset.rule));
+    renderParams();
+    send(buildUrl(current(), values()));
+  });
 
   // --- Pagination ------------------------------------------------------------
   // A paginated response is {"items": [...], "total", "limit", "offset"} (GET /db/artists).

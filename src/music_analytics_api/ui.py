@@ -29,6 +29,7 @@ class EndpointInfo(TypedDict):
     param_types: dict[str, str]  # Type of each path and query parameter: "int"...
     query_params: list[str]
     group: Literal["memory", "db"]
+    paginated_alternative: str | None  # Rule of a paginated route with the same data
 
 
 # Query-string parameters each endpoint reads, with their type ("int" or "string");
@@ -37,6 +38,11 @@ QUERY_PARAMS: dict[str, dict[str, str]] = {
     "api.search_artists": {"q": "string"},
     "db.list_artists": {"limit": "int", "offset": "int"},
 }
+
+# Unpaginated routes whose data is only a sample of a paginated route. The page shows
+# a note with a button to switch, because /artists (5 sample artists) and /db/artists
+# (275 Chinook artists, by page) are easy to confuse.
+PAGINATED_ALTERNATIVES: dict[str, str] = {"/artists": "/db/artists"}
 
 # Quick test cases shown as buttons. The label starts with the status code they get;
 # tests/test_ui.py sends each one and checks it.
@@ -147,6 +153,7 @@ def api_endpoints() -> list[EndpointInfo]:
                 },
                 "query_params": list(query),
                 "group": "db" if rule.endpoint.startswith("db.") else "memory",
+                "paginated_alternative": PAGINATED_ALTERNATIVES.get(rule.rule),
             }
         )
     return endpoints

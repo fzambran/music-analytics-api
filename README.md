@@ -45,6 +45,7 @@ Con la API en marcha, abre `http://127.0.0.1:5000/ui` (o el puerto que uses) par
 - La respuesta muestra el código de estado, el `Content-Type`, el tiempo y el número de resultados, como tabla o como JSON. La búsqueda, el filtro por columna numérica y el orden por columna se aplican en el navegador sobre la respuesta recibida, no son parámetros de la API.
 
 - Con una respuesta paginada (`/db/artists`), los botones "Anterior" y "Siguiente" piden la página vecina con el mismo `limit`, y el texto entre ellos indica el rango ("21–40 de 275").
+- `/artists` no está paginado: devuelve los 5 artistas de ejemplo de una vez. Al consultarlo, una nota lo indica y ofrece el botón "Ir a /db/artists" para recorrer los 275 artistas de Chinook por páginas.
 
 La página usa la misma API, así que no necesita CORS ni dependencias adicionales.
 
