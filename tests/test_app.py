@@ -211,6 +211,17 @@ def test_create_app_routes_ints_with_the_ascii_converter():
         assert url_for("api.get_artist", artist_id=5) == "/artists/5"
 
 
+@pytest.mark.parametrize(("value", "expected"), [(5, "5"), (True, "1"), (3.0, "3")])
+def test_url_for_builds_int_routes_like_werkzeug(value, expected):
+    """Building a URL keeps Werkzeug's int(): only reading one uses the ASCII rule."""
+    from flask import url_for
+
+    app = create_app()
+    with app.test_request_context():
+        assert url_for("api.get_artist", artist_id=value) == f"/artists/{expected}"
+        assert app.test_client().get(f"/artists/{expected}").status_code in (200, 404)
+
+
 def test_ascii_int_converter_keeps_werkzeug_options():
     """signed, min and max still work, with ASCII digits only."""
     from music_analytics_api.app import AsciiIntConverter
@@ -226,10 +237,20 @@ def test_ascii_int_converter_keeps_werkzeug_options():
     def at_least_two(m):
         return {"m": m}
 
+    @app.route("/f/<int(fixed_digits=4):f>")
+    def four_digits(f):
+        return {"f": f}
+
     client = app.test_client()
     assert client.get("/n/-3").get_json() == {"n": -3}
     assert client.get("/n/005").get_json() == {"n": 5}
     assert client.get("/m/2").get_json() == {"m": 2}
+    assert client.get("/f/0003").get_json() == {"f": 3}
+    assert client.get("/f/03").status_code == 404
+    with app.test_request_context():
+        from flask import url_for
+
+        assert url_for("four_digits", f=3) == "/f/0003"
     for path in ["/n/6", "/n/٣", "/n/+3", "/n/-٣", "/m/1"]:
         assert client.get(path).status_code == 404, path
     # Huge values are capped above SQLITE_MAX_INTEGER instead of failing in int().

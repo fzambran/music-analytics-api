@@ -123,7 +123,7 @@ def get_artist_albums(artist_id: int):
 
     Responds 404 if the artist does not exist and 200 with `[]` if it has no albums.
     """
-    if artist_id > SQLITE_MAX_INTEGER:  # Flask's int converter has no upper bound
+    if artist_id > SQLITE_MAX_INTEGER:  # AsciiIntConverter caps huge IDs at MAX + 1
         return jsonify({"error": "Artist not found"}), 404
     with closing(get_db_connection()) as connection:
         artist = connection.execute(

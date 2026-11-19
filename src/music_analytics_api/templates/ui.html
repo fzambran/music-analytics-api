@@ -204,6 +204,7 @@
     max_query_length: MAX_QUERY_LENGTH,
     default_page_size: DEFAULT_PAGE_SIZE,
     max_page_size: MAX_PAGE_SIZE,
+    max_offset: MAX_OFFSET,  // A string: compared with BigInt, Number would round it.
   } = JSON.parse(document.getElementById("limits-data").textContent);
   // Help for known parameters; any other path parameter gets TYPE_HELP for its converter.
   const FIELD_HELP = {
@@ -307,6 +308,8 @@
         } else if (type === "string" && value.includes("/")) errors[name] = "No puede contener /.";
       } else if (name === "limit" && value && !(/^\d+$/.test(value) && value >= 1 && value <= MAX_PAGE_SIZE)) {
         errors[name] = `Debe ser un entero de 1 a ${MAX_PAGE_SIZE}.`;
+      } else if (name === "offset" && value && TYPE_PATTERN.int.test(value) && BigInt(value) > BigInt(MAX_OFFSET)) {
+        errors[name] = `Debe ser un entero de 0 a ${MAX_OFFSET}.`;
       } else if (typeOf(ep, name) === "int" && value && !TYPE_PATTERN.int.test(value)) {
         errors[name] = "Debe ser un entero mayor o igual que 0.";
       } else if (name === "q" && !value.trim()) {
@@ -508,7 +511,8 @@
     const { items, total, limit, offset } = page;
     $("page-info").textContent = items.length
       ? `${offset + 1}–${offset + items.length} de ${total}`
-      : `Sin resultados desde ${offset + 1} (total: ${total})`;
+      // No offset number here: past 2**53 JSON.parse already rounded it.
+      : `Sin resultados: offset pasa del total (${total})`;
     $("page-prev").disabled = offset === 0;
     $("page-next").disabled = offset + limit >= total;
   }
