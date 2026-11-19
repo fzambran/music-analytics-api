@@ -43,7 +43,7 @@ El código está en `src/music_analytics_api/` y las pruebas en `tests/`; el sco
 
 | Scope | Código | Pruebas |
 |---|---|---|
-| `api` | `app.py`, `config.py`, `routes.py`, `models.py`, `analytics.py` | `test_app.py`, `test_routes.py` |
+| `api` | `app.py`, `config.py`, `routes.py`, `models.py`, `analytics.py`, `ui.py` y `templates/ui.html` (explorador `/ui`) | `test_app.py`, `test_routes.py`, `test_ui.py` |
 | `db` | `db_routes.py` (Blueprint `/db`) | `test_db_routes.py`, `test_db_routes_unit.py` |
 | `reporter` | `reporter.py` | `test_reporter.py`, `test_reporter_unit.py` |
 | `deps` | `chore(deps)`: dependencias en `pyproject.toml` y `uv.lock` | |
