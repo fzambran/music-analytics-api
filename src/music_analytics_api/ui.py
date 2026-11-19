@@ -4,6 +4,8 @@ import re
 
 from flask import Blueprint, current_app, render_template
 
+from music_analytics_api.routes import MAX_QUERY_LENGTH
+
 ui_bp = Blueprint("ui", __name__, template_folder="templates")
 
 # Query-string parameters each endpoint reads; path parameters come from the URL rule.
@@ -43,9 +45,9 @@ PRESETS: list[dict] = [
         "status": 400,
     },
     {
-        "label": "400 · q de 101 caracteres",
+        "label": f"400 · q de {MAX_QUERY_LENGTH + 1} caracteres",
         "rule": "/artists/search",
-        "params": {"q": "a" * 101},
+        "params": {"q": "a" * (MAX_QUERY_LENGTH + 1)},
         "status": 400,
     },
     {
@@ -98,4 +100,9 @@ def api_endpoints() -> list[dict]:
 @ui_bp.route("/ui", methods=["GET"])
 def explorer():
     """Render the API explorer: a request form and a response panel."""
-    return render_template("ui.html", endpoints=api_endpoints(), presets=PRESETS)
+    return render_template(
+        "ui.html",
+        endpoints=api_endpoints(),
+        presets=PRESETS,
+        limits={"max_query_length": MAX_QUERY_LENGTH},
+    )
