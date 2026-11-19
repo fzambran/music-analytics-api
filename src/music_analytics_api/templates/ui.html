@@ -512,7 +512,8 @@
     $("page-info").textContent = items.length
       ? `${offset + 1}–${offset + items.length} de ${total}`
       // No offset number here: past 2**53 JSON.parse already rounded it.
-      : `Sin resultados: offset pasa del total (${total})`;
+      : total === 0 ? "Sin resultados (total: 0)"
+      : `Sin resultados: no hay más después del total (${total})`;
     $("page-prev").disabled = offset === 0;
     $("page-next").disabled = offset + limit >= total;
   }
