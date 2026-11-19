@@ -177,16 +177,20 @@
 
 <script id="endpoints-data" type="application/json">{{ endpoints|tojson }}</script>
 <script id="presets-data" type="application/json">{{ presets|tojson }}</script>
+<script id="limits-data" type="application/json">{{ limits|tojson }}</script>
 <script>
 (() => {
   "use strict";
   const ENDPOINTS = JSON.parse(document.getElementById("endpoints-data").textContent);
   const PRESETS = JSON.parse(document.getElementById("presets-data").textContent);
-  const MAX_QUERY_LENGTH = 100;
+  // The API's own limit (routes.MAX_QUERY_LENGTH), so the form never drifts from it.
+  const { max_query_length: MAX_QUERY_LENGTH } = JSON.parse(document.getElementById("limits-data").textContent);
   const FIELD_HELP = {
     artist_id: "Entero. Memoria: 1–5 · Chinook: 1–275.",
-    q: "Texto a buscar en el nombre del artista (obligatorio, máximo 100 caracteres).",
+    q: `Texto a buscar en el nombre del artista (obligatorio, máximo ${MAX_QUERY_LENGTH} caracteres).`,
   };
+  // Characters as Python's len() counts them: an emoji is 1, not 2 UTF-16 units.
+  const charCount = (text) => [...text].length;
   const $ = (id) => document.getElementById(id);
   const form = $("request-form"), select = $("endpoint"), paramsBox = $("params");
   const state = { rows: [], columns: [], sort: { col: null, dir: 1 } };
@@ -232,9 +236,15 @@
     updatePreview();
   }
 
+  // Path parameters are trimmed here, once, so validation, preview, curl and the request
+  // all use the same value; q is sent as typed because the API strips it itself.
   function values() {
+    const ep = current();
     const result = {};
-    for (const name of fieldsOf(current())) result[name] = $("param-" + name).value;
+    for (const name of fieldsOf(ep)) {
+      const raw = $("param-" + name).value;
+      result[name] = ep.path_params.includes(name) ? raw.trim() : raw;
+    }
     return result;
   }
 
@@ -252,11 +262,11 @@
   function validationErrors(vals) {
     const errors = {};
     for (const [name, value] of Object.entries(vals)) {
-      if (name === "artist_id" && !/^\d+$/.test(value.trim())) {
+      if (name === "artist_id" && !/^\d+$/.test(value)) {
         errors[name] = "Debe ser un entero mayor o igual que 0.";
       } else if (name === "q" && !value.trim()) {
         errors[name] = "q es obligatorio.";
-      } else if (name === "q" && value.trim().length > MAX_QUERY_LENGTH) {
+      } else if (name === "q" && charCount(value.trim()) > MAX_QUERY_LENGTH) {
         errors[name] = `Máximo ${MAX_QUERY_LENGTH} caracteres.`;
       }
     }
@@ -273,7 +283,7 @@
   function updatePreview() {
     const vals = values();
     for (const name of fieldsOf(current())) {
-      const counter = name === "q" ? ` (${vals.q.trim().length}/${MAX_QUERY_LENGTH})` : "";
+      const counter = name === "q" ? ` (${charCount(vals.q.trim())}/${MAX_QUERY_LENGTH})` : "";
       $("help-" + name).textContent = FIELD_HELP[name] ? FIELD_HELP[name] + counter : counter;
     }
     $("url-preview").textContent = "GET " + buildUrl(current(), vals);
@@ -295,7 +305,12 @@
   });
 
   $("reset").addEventListener("click", () => {
+    inFlight?.abort();
+    inFlight = null;
     select.selectedIndex = 0;
+    $("validate").checked = true;
+    $("search").value = "";
+    $("num-min").value = "";
     renderParams();
     showResponse(null);
   });
@@ -327,22 +342,34 @@
   }
 
   // --- Sending and showing the response ------------------------------------
+  // Only the latest request may update the panel: sending again or pressing Limpiar
+  // aborts the previous one, so a slow earlier response cannot overwrite a newer one.
+  let inFlight = null;
+
   async function send(url) {
+    inFlight?.abort();
+    const controller = (inFlight = new AbortController());
     const badges = $("badges");
     badges.replaceChildren(badge("Enviando…"));
     const started = performance.now();
     try {
-      const response = await fetch(url, { headers: { Accept: "application/json" } });
+      const response = await fetch(url, {
+        headers: { Accept: "application/json" },
+        signal: controller.signal,
+      });
       const body = await response.text();
+      if (controller !== inFlight) return;
       const elapsed = Math.round(performance.now() - started);
       const contentType = response.headers.get("Content-Type") || "";
       let json, isJson = false;
       if (contentType.includes("json")) {
         try { json = JSON.parse(body); isJson = true; } catch { /* shown as text */ }
       }
+      inFlight = null;
       showResponse({ url, status: response.status, statusText: response.statusText,
                      contentType, elapsed, body, json, isJson });
     } catch (error) {
+      if (controller !== inFlight) return;  // Aborted by a newer request or by Limpiar.
       badges.replaceChildren(badge("Error de red", "err"), badge(String(error.message || error)));
       setRows([], []);
       $("raw").textContent = "";

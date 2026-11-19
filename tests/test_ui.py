@@ -8,6 +8,7 @@ import pytest
 
 from music_analytics_api import ui
 from music_analytics_api.app import create_app
+from music_analytics_api.routes import MAX_QUERY_LENGTH
 
 
 @pytest.fixture
@@ -62,7 +63,9 @@ def test_ui_lists_every_api_route_but_itself(app, client):
     api_rules = {
         rule.rule
         for rule in app.url_map.iter_rules()
-        if rule.endpoint != "static" and not rule.endpoint.startswith("ui.")
+        if rule.endpoint != "static"
+        and not rule.endpoint.startswith("ui.")
+        and "GET" in rule.methods
     }
     assert listed == api_rules
 
@@ -105,8 +108,19 @@ def test_ui_preset_answers_its_expected_status(app, client, preset):
     assert preset["label"].startswith(str(preset["status"]))
 
 
-def test_ui_presets_cover_every_status_the_api_answers():
+def test_ui_presets_cover_200_400_and_404():
     assert {preset["status"] for preset in ui.PRESETS} == {200, 400, 404}
+
+
+def test_ui_uses_the_api_query_length_limit(client):
+    """The form validates q with the API's limit, not a copy that can drift from it."""
+    html = client.get("/ui").get_data(as_text=True)
+
+    assert _page_data(html, "limits-data") == {"max_query_length": MAX_QUERY_LENGTH}
+    too_long = [
+        p for p in ui.PRESETS if p["status"] == 400 and len(p["params"]["q"]) > 0
+    ]
+    assert [len(p["params"]["q"]) for p in too_long] == [MAX_QUERY_LENGTH + 1]
 
 
 def test_ui_element_ids_are_unique(client):
