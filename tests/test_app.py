@@ -197,3 +197,41 @@ def test_chinook_db_path_expands_the_home_directory(tmp_path):
     output = _run_python(code, cwd=tmp_path, env_overrides=env)
 
     assert output.strip() == str(tmp_path.resolve() / "other.db")
+
+
+def test_create_app_routes_ints_with_the_ascii_converter():
+    """<int:...> in every Blueprint uses the project's rule, not Werkzeug's."""
+    from music_analytics_api.app import AsciiIntConverter
+
+    app = create_app()
+    assert app.url_map.converters["int"] is AsciiIntConverter
+    with app.test_request_context():
+        from flask import url_for
+
+        assert url_for("api.get_artist", artist_id=5) == "/artists/5"
+
+
+def test_ascii_int_converter_keeps_werkzeug_options():
+    """signed, min and max still work, with ASCII digits only."""
+    from music_analytics_api.app import AsciiIntConverter
+
+    app = Flask("converter_options")
+    app.url_map.converters["int"] = AsciiIntConverter
+
+    @app.route("/n/<int(signed=True, max=5):n>")
+    def number(n):
+        return {"n": n}
+
+    @app.route("/m/<int(min=2):m>")
+    def at_least_two(m):
+        return {"m": m}
+
+    client = app.test_client()
+    assert client.get("/n/-3").get_json() == {"n": -3}
+    assert client.get("/n/005").get_json() == {"n": 5}
+    assert client.get("/m/2").get_json() == {"m": 2}
+    for path in ["/n/6", "/n/٣", "/n/+3", "/n/-٣", "/m/1"]:
+        assert client.get(path).status_code == 404, path
+    # Huge values are capped above SQLITE_MAX_INTEGER instead of failing in int().
+    assert client.get("/m/" + "9" * 5000).get_json() == {"m": 2**63}
+    assert client.get("/n/-" + "9" * 5000).get_json() == {"n": -(2**63)}

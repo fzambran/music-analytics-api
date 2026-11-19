@@ -365,3 +365,31 @@ def test_routes_respond_with_json_content_type(client, path):
     response = client.get(path)
 
     assert response.mimetype == "application/json"
+
+
+# --- Route IDs: the app's int converter (AsciiIntConverter) -----------------
+
+
+@pytest.mark.parametrize("path", ["/artists/{}", "/artists/{}/albums"])
+def test_artist_id_of_thousands_of_digits_answers_json_404(client, path):
+    """Past Python's 4300-digit int() limit the route still matches: JSON, not HTML."""
+    response = client.get(path.format("9" * 5000))
+
+    assert response.status_code == 404
+    assert response.get_json() == {"error": "Artist not found"}
+
+
+@pytest.mark.parametrize("artist_id", ["٣", "３", "١٢"])
+def test_artist_id_with_non_ascii_digits_is_not_routed(client, artist_id):
+    """Only ASCII digits are IDs, as for limit and offset; "٣" is not artist 3."""
+    response = client.get(f"/artists/{artist_id}")
+
+    assert response.status_code == 404
+    assert response.get_json(silent=True) != {"error": "Artist not found"}
+
+
+def test_artist_id_with_leading_zeros_is_the_same_artist(client):
+    response = client.get("/artists/0003")
+
+    assert response.status_code == 200
+    assert response.get_json()["artist_id"] == 3

@@ -1,6 +1,6 @@
 # Plan: `reporter.py`, estadísticas por artista desde Chinook (JSON/CSV)
 
-> Plan actualizado al estado de `main` en `90e3385` (PR #8).
+> Plan actualizado con los cambios del reporte hasta el PR #35 (el historial de abajo los resume).
 > Reemplaza al plan original aprobado en modo plan, que describía solo la primera versión (PR #5, commit `e58d374`).
 > La sección [Historial de cambios respecto del plan original](#historial-de-cambios-respecto-del-plan-original) resume qué cambió y por qué.
 
@@ -104,10 +104,10 @@ uv run python -m music_analytics_api.reporter --format {json,csv} [--output RUTA
 | `--format` | Obligatorio: `json` o `csv`. |
 | `--output RUTA` | Archivo en UTF-8; crea los directorios que falten. Sin esta opción escribe a stdout. |
 | `--db RUTA` | Base SQLite a leer, en solo lectura. Por defecto, `chinook.db` del repositorio. |
-| `--artist-id N` | Un artista por ID (entero entre 1 y 2^63−1, el máximo que acepta SQLite). |
+| `--artist-id N` | Un artista por ID (entero entre 1 y 2^63−1, el máximo que acepta SQLite; solo dígitos ASCII, como `limit`/`offset` de la API: se aceptan ceros a la izquierda, no `+5`, ` 5`, `1_000` ni `٥`). |
 | `--artist NOMBRE` | Un artista por nombre exacto, sin distinguir mayúsculas; los espacios y la puntuación deben coincidir (`acdc` no encuentra a AC/DC). |
 | `--artist-contains TEXTO` | Todos los artistas cuyo nombre contiene el texto, sin distinguir mayúsculas, acentos, espacios ni puntuación (`acdc` → AC/DC). El texto debe tener al menos una letra o un número. |
-| `--top N` | Los primeros N según el orden (entero entre 1 y 2^63−1), después del filtro de artista. |
+| `--top N` | Los primeros N según el orden (entero entre 1 y 2^63−1, con la misma regla de dígitos que `--artist-id`), después del filtro de artista. |
 | `--sort-by CAMPO` | Un campo de `SORT_COLUMNS`; por defecto `revenue`. |
 | `--detail` | Detalle por álbum: anidado en JSON, una fila por álbum en CSV. |
 
@@ -193,6 +193,7 @@ No se traducen, a propósito: el texto de `--help`, los `ValueError` de las func
 | #9 | Errores de consulta separados de los de apertura | Un `database is locked` se mostraba como "no se pudo abrir la base de datos". |
 | #10 | `--artist-contains` ignora acentos, espacios y puntuación (`normalize_for_search`); `--artist` no cambia | "acdc" no encontraba a "AC/DC". Solo en la búsqueda parcial, para que la exacta no genere empates entre nombres que difieren en puntuación. |
 | #8 | Pruebas de sangría y de ida y vuelta del JSON, sobrescritura, archivo de salida tras un error, permisos y cierre de la conexión | Huecos encontrados al revisar la cobertura de `test_reporter.py`. Solo agrega pruebas. |
+| #35 | `--top` y `--artist-id` con `parse_unsigned_int` de `validation.py` | `int()` aceptaba `" 5"`, `"+5"`, `"1_000"` y `"٥"`, que `/db` rechaza; ahora salen con código 2. Además, un número de miles de dígitos decía "no es un número entero" en vez de "debe ser menor o igual que 2^63−1". |
 
 Partes del plan original que quedaron obsoletas: la sección "Rama" (`feat/artist-reporter` ya se fusionó y se borró), el riesgo "si el PR #3 se fusiona no cambia `get_db_connection`" y la prueba de base inexistente con `monkeypatch`.
 

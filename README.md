@@ -52,7 +52,7 @@ Las sesiones se guardan en la carpeta de instancia de Flask (`src/instance/flask
 
 ## Endpoints
 
-Todos los endpoints aceptan solo `GET`. `/ui` es la página HTML del explorador; no es parte de la API. Las respuestas y los errores de la API (400, 404 y los 500 de `/db`, con la forma `{"error": "..."}`) son JSON. Los errores que genera Flask por su cuenta siguen siendo páginas HTML: un 404 por una ruta que no existe y un 405 por otro método.
+Todos los endpoints aceptan solo `GET`. `/ui` es la página HTML del explorador; no es parte de la API. Las respuestas y los errores de la API (400, 404 y los 500 de `/db`, con la forma `{"error": "..."}`) son JSON. Los errores que genera Flask por su cuenta siguen siendo páginas HTML: un 404 por una ruta que no existe y un 405 por otro método. Un `<artist_id>` debe estar formado solo por dígitos ASCII (se aceptan ceros a la izquierda: `/artists/0003` es el artista 3); cualquier otro valor, como `abc`, `-1` o `٣`, no coincide con la ruta y recibe ese 404 HTML. Un ID enorme sí coincide y responde `404 {"error": "Artist not found"}`.
 
 ### Datos en memoria
 
@@ -168,13 +168,13 @@ music-analytics-api/
 
 | Módulo (`src/music_analytics_api/`) | Contenido |
 |---|---|
-| `app.py` | `create_app()`: crea la app Flask, configura las sesiones y registra los Blueprints de rutas. |
+| `app.py` | `create_app()`: crea la app Flask, configura las sesiones, registra el conversor de IDs (`AsciiIntConverter`) y los Blueprints de rutas. |
 | `config.py` | Configuración de Flask (`SECRET_KEY` y el tipo de sesión). `create_app()` crea el almacén de sesiones en la carpeta de instancia. |
 | `models.py` | Clases `Artist` y `Album` y el almacén en memoria con los datos de ejemplo. |
 | `routes.py` | Blueprint con los endpoints que usan los datos en memoria. |
 | `db_routes.py` | Blueprint `/db` con los endpoints que consultan `data/chinook.db` y los modelos Pydantic `AlbumOut` y `ArtistOut` que validan sus respuestas. |
 | `analytics.py` | Funciones puras de estadísticas usadas por `/stats/*`. |
-| `validation.py` | Validación de enteros compartida por los endpoints `/db` y el reporte. |
+| `validation.py` | Validación de enteros compartida por la API (IDs de las rutas, `limit` y `offset`) y el reporte. |
 | `ui.py` y `templates/ui.html` | Blueprint `/ui`: el explorador de la API en el navegador. |
 | `reporter.py` | CLI que genera estadísticas por artista desde `data/chinook.db` en JSON o CSV. |
 

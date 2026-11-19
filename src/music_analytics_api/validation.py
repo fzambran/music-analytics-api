@@ -1,8 +1,9 @@
-"""Integer parsing shared by the /db routes and the reporter CLI.
+"""Integer parsing shared by the API (routes and query parameters) and the reporter CLI.
 
-Kept free of Flask and Pydantic, so the reporter can use it without the web stack.
-Each caller builds its own message: the API answers in English JSON, the CLI in
-Spanish through argparse.
+It imports neither Flask nor Pydantic, so it has no web dependencies of its own. The
+reporter still loads both today through db_routes (get_db_connection); see "Riesgos"
+in docs/PLAN.md. Each caller builds its own message: the API answers in English
+JSON, the CLI in Spanish through argparse.
 """
 
 import re

@@ -213,8 +213,8 @@
     offset: "Cuántos resultados saltar desde el principio. Vacío: 0.",
   };
   const TYPE_HELP = { int: "Entero mayor o igual que 0.", float: "Número con punto decimal, por ejemplo 1.5." };
-  // Flask's int and float converters only match unsigned digits ("1", "1.5"); anything
-  // else is not routed and gets Flask's HTML 404.
+  // The app's int converter (AsciiIntConverter) only matches ASCII digits and Flask's
+  // float converter only "1.5"; anything else is not routed and gets Flask's HTML 404.
   const TYPE_PATTERN = { int: /^\d+$/, float: /^\d+\.\d+$/ };
   const typeOf = (ep, name) => ep.param_types[name] ?? "string";
   // Characters as Python's len() counts them: an emoji is 1, not 2 UTF-16 units.
